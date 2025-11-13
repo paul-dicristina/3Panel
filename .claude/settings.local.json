@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run client:*)",
+      "Bash(lsof:*)",
+      "Bash(xargs kill:*)",
+      "Bash(npm run server:*)",
+      "Bash(curl:*)",
+      "Bash(pkill:*)",
+      "Bash(awk:*)",
+      "Bash(npm run dev:*)",
+      "Bash(R:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
