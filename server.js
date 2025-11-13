@@ -35,7 +35,7 @@ app.get('/health', (req, res) => {
  */
 app.post('/api/chat', async (req, res) => {
   try {
-    const { apiKey, messages } = req.body;
+    const { apiKey, messages, suggestionsEnabled } = req.body;
 
     if (!apiKey) {
       return res.status(400).json({
@@ -55,14 +55,21 @@ app.post('/api/chat', async (req, res) => {
     });
 
     // System prompt for data analysis assistant
-    const systemPrompt = `You are a helpful data analysis assistant. When users ask you to analyze data, load files, or create visualizations, you should:
+    let systemPrompt = `You are a helpful data analysis assistant. When users ask you to analyze data, load files, or create visualizations, you should:
 
-1. Provide clear explanations of what you're doing
+1. Provide a brief conversational acknowledgment
 2. Generate R code to accomplish the task
 3. Wrap all R code in markdown code blocks with the 'r' language identifier
 
+IMPORTANT FORMATTING RULES:
+- Keep your text response BRIEF and conversational
+- Do NOT describe what the code does in detail - the code card will show that
+- Do NOT explain the code output - users will see it in the output panel
+- Put ALL executable R code in code blocks
+- Each code block should be complete and self-contained
+
 Example response format:
-"I'll help you create a scatter plot of your data. Here's the R code:
+"I'll create that visualization for you.
 
 \`\`\`r
 # Load the data
@@ -74,9 +81,25 @@ ggplot(data, aes(x=variable1, y=variable2)) +
   geom_point() +
   theme_minimal() +
   labs(title="Scatter Plot", x="Variable 1", y="Variable 2")
-\`\`\`
+\`\`\`"
 
-This code will create a beautiful scatter plot showing the relationship between the two variables."`;
+The mtcars dataset is pre-loaded for you to use in all code.`;
+
+    // Add suggestions instructions if enabled
+    if (suggestionsEnabled) {
+      systemPrompt += `
+
+IMPORTANT: After providing your response and R code, if the user's request involved analyzing a specific dataset, you MUST include 4-5 suggestions for further analysis. Format these suggestions at the end of your response like this:
+
+**Suggestions for further analysis:**
+- Suggestion 1
+- Suggestion 2
+- Suggestion 3
+- Suggestion 4
+- Suggestion 5
+
+The suggestions should be relevant to the dataset that was just analyzed and offer meaningful next steps the user could take. If no dataset was referenced in the request, do NOT include suggestions.`;
+    }
 
     // Call Claude API
     // Using Claude 3 Opus - the most powerful model for best code generation

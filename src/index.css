@@ -23,23 +23,28 @@
 
 /* Split.js gutter styling */
 .gutter {
-  background-color: #e5e7eb;
+  background-color: #f5f8f9;
   background-repeat: no-repeat;
   background-position: 50%;
+  border: 1px solid #d7dadc;
 }
 
 .gutter:hover {
-  background-color: #d1d5db;
+  background-color: #d7dadc;
 }
 
 .gutter.gutter-horizontal {
   cursor: col-resize;
   background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUAAAAeCAYAAADkftS9AAAAIklEQVQoU2M4c+bMfxAGAgYYmwGrIIiDjrELjpo5aiZeMwF+yNnOs5KSvgAAAABJRU5ErkJggg==');
+  border-top: 1px solid #d7dadc;
+  border-bottom: 1px solid #d7dadc;
 }
 
 .gutter.gutter-vertical {
   cursor: row-resize;
   background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAB4AAAAFAQMAAABo7865AAAABlBMVEVHcEzMzMzyAv2sAAAAAXRSTlMAQObYZgAAABBJREFUeF5jOAMEEAIEEFwAn3kMwcB6I2AAAAAASUVORK5CYII=');
+  border-left: 1px solid #d7dadc;
+  border-right: 1px solid #d7dadc;
 }
 
 body {

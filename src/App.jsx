@@ -31,6 +31,11 @@ function App() {
   const [currentOutput, setCurrentOutput] = useState(null);
   const [currentCode, setCurrentCode] = useState('');
 
+  // UI state
+  const [suggestionsEnabled, setSuggestionsEnabled] = useState(false);
+  const [showConversationsMenu, setShowConversationsMenu] = useState(false);
+  const [showOptionsMenu, setShowOptionsMenu] = useState(false);
+
   // Refs for resizable panels
   const splitInstanceRef = useRef(null);
   const splitVerticalInstanceRef = useRef(null);
@@ -54,6 +59,34 @@ function App() {
       textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
     }
   }, [inputValue]);
+
+  // Close conversations menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showConversationsMenu && !event.target.closest('.conversations-menu-container')) {
+        setShowConversationsMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showConversationsMenu]);
+
+  // Close options menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showOptionsMenu && !event.target.closest('.options-menu-container')) {
+        setShowOptionsMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showOptionsMenu]);
 
   // Initialize Split.js for resizable panels
   useEffect(() => {
@@ -98,6 +131,35 @@ function App() {
     setShowApiKeyModal(false);
   };
 
+  // Handle new conversation - reset all panels
+  const handleNewConversation = () => {
+    setMessages([]);
+    setCodeCards([]);
+    setSelectedCardId(null);
+    setCurrentOutput(null);
+    setCurrentCode('');
+    setInputValue('');
+  };
+
+  // Toggle conversations menu
+  const handleToggleConversations = () => {
+    setShowConversationsMenu(!showConversationsMenu);
+  };
+
+  // Handle suggestion click - populate input field but don't submit
+  const handleSuggestionClick = (suggestion) => {
+    setInputValue(suggestion);
+    // Focus the textarea
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  };
+
+  // Toggle options menu
+  const handleToggleOptions = () => {
+    setShowOptionsMenu(!showOptionsMenu);
+  };
+
   // Handle sending a message to Claude
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
@@ -119,7 +181,8 @@ function App() {
       const response = await sendMessageToClaude(
         apiKey,
         userMessage,
-        messages.map(m => ({ role: m.role, content: m.content }))
+        messages.map(m => ({ role: m.role, content: m.content })),
+        suggestionsEnabled
       );
 
       // Create code cards for any R code blocks
@@ -128,12 +191,18 @@ function App() {
             id: `card-${Date.now()}-${index}`,
             code: block.code,
             summary: block.summary,
+            description: block.description,
             output: null
           }))
         : [];
 
       // Strip R code blocks from the displayed message text
-      const messageText = response.text.replace(/```r\n[\s\S]*?\n```/g, '').trim();
+      // Matches both ```r and ```R with optional whitespace
+      const messageText = response.text.replace(/```[rR]\s*\n[\s\S]*?```/g, '').trim();
+
+      // Debug: Log if suggestions are enabled and what the message contains
+      console.log('Suggestions enabled:', suggestionsEnabled);
+      console.log('Message text after stripping code:', messageText);
 
       // Add assistant response to chat with embedded code cards
       const assistantMessage = {
@@ -220,22 +289,60 @@ function App() {
     }
   };
 
+  // Parse suggestions from message content
+  const parseSuggestions = (content) => {
+    const suggestionsMatch = content.match(/\*\*Suggestions for further analysis:\*\*\s*([\s\S]*?)(?:\n\n|$)/);
+    if (!suggestionsMatch) return { mainContent: content, suggestions: [] };
+
+    const mainContent = content.replace(/\*\*Suggestions for further analysis:\*\*\s*[\s\S]*$/, '').trim();
+    const suggestionsText = suggestionsMatch[1];
+    const suggestions = suggestionsText
+      .split('\n')
+      .filter(line => line.trim().startsWith('-'))
+      .map(line => line.replace(/^-\s*/, '').trim());
+
+    return { mainContent, suggestions };
+  };
+
   // Render chat messages
   const renderMessage = (message) => {
+    const { mainContent, suggestions } = message.role === 'assistant'
+      ? parseSuggestions(message.content)
+      : { mainContent: message.content, suggestions: [] };
+
     return (
       <div key={message.id} className="mb-4">
         {/* Message bubble */}
         <div className={`${message.role === 'user' ? 'text-right' : 'text-left'}`}>
           <div
-            className={`inline-block max-w-[80%] p-3 rounded-lg text-base ${
+            className={`inline-block max-w-[80%] p-3 rounded-lg ${
               message.role === 'user'
                 ? 'bg-blue-600 text-white'
-                : 'bg-gray-200 text-gray-800'
+                : 'bg-white text-gray-800 border border-gray-200'
             }`}
+            style={{ fontSize: '11pt' }}
           >
-            <div className="whitespace-pre-wrap break-words">{message.content}</div>
+            <div className="whitespace-pre-wrap break-words">{mainContent}</div>
           </div>
         </div>
+
+        {/* Suggestions (if any) */}
+        {suggestions.length > 0 && (
+          <div className="mt-3 ml-0" style={{ fontSize: '11pt' }}>
+            <p className="font-semibold text-gray-700 mb-2">Suggestions for further analysis:</p>
+            <div className="space-y-1">
+              {suggestions.map((suggestion, index) => (
+                <button
+                  key={index}
+                  onClick={() => handleSuggestionClick(suggestion)}
+                  className="block text-left text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+                >
+                  • {suggestion}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Code cards inline (if any) */}
         {message.codeCards && message.codeCards.length > 0 && (
@@ -245,6 +352,7 @@ function App() {
                 key={card.id}
                 id={card.id}
                 summary={card.summary}
+                description={card.description}
                 code={card.code}
                 isSelected={card.id === selectedCardId}
                 onClick={handleCardSelect}
@@ -306,14 +414,14 @@ function App() {
 
         {/* Text output (only show if no plots) */}
         {currentOutput.output && (!currentOutput.plots || currentOutput.plots.length === 0) && (
-          <pre className="bg-gray-50 p-4 rounded mb-4 text-base overflow-x-auto">
+          <pre className="bg-gray-50 p-4 rounded mb-4 overflow-x-auto" style={{ fontSize: '11pt' }}>
             {currentOutput.output}
           </pre>
         )}
 
         {/* Tables */}
         {currentOutput.tables && currentOutput.tables.length > 0 && (
-          <div className="space-y-4">
+          <div className="space-y-4" style={{ fontSize: '11pt' }}>
             {currentOutput.tables.map((table, index) => (
               <div key={index} className="overflow-x-auto">
                 <table className="min-w-full border border-gray-300">
@@ -322,7 +430,7 @@ function App() {
                       {table.headers.map((header, i) => (
                         <th
                           key={i}
-                          className="border border-gray-300 px-4 py-2 text-left text-sm font-semibold"
+                          className="border border-gray-300 px-4 py-2 text-left font-semibold"
                         >
                           {header}
                         </th>
@@ -335,7 +443,7 @@ function App() {
                         {row.map((cell, j) => (
                           <td
                             key={j}
-                            className="border border-gray-300 px-4 py-2 text-sm"
+                            className="border border-gray-300 px-4 py-2"
                           >
                             {cell}
                           </td>
@@ -357,7 +465,85 @@ function App() {
       {/* Header */}
       <header className="bg-[#f5f8f9] h-[24px] border-b border-[#d7dadc]">
         <div className="flex items-center justify-between h-full px-3">
-          <h1 className="text-xs font-semibold text-gray-800">Positronic</h1>
+          <div className="flex items-center gap-2 h-full relative">
+            <img
+              src="/new-conversation.png"
+              alt="New conversation"
+              className="h-4 cursor-pointer"
+              onClick={handleNewConversation}
+            />
+            <div className="relative conversations-menu-container">
+              <img
+                src="/conversations.png"
+                alt="Conversations"
+                className="h-4 cursor-pointer"
+                onClick={handleToggleConversations}
+              />
+              {showConversationsMenu && (
+                <div className="absolute top-full left-0 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg p-4 min-w-[200px] z-50">
+                  <p className="text-sm text-gray-700">Conversations will appear here</p>
+                  <p className="text-xs text-gray-500 mt-2">Coming soon...</p>
+                </div>
+              )}
+            </div>
+            <img src="/separator.png" alt="" className="h-4" />
+            <img
+              src={suggestionsEnabled ? "/suggestions-on.png" : "/suggestions-off.png"}
+              alt={suggestionsEnabled ? "Suggestions on" : "Suggestions off"}
+              className="h-4 cursor-pointer"
+              onClick={() => setSuggestionsEnabled(!suggestionsEnabled)}
+            />
+            <div className="relative options-menu-container">
+              <img
+                src="/options.png"
+                alt="Options"
+                className="h-4 cursor-pointer"
+                onClick={handleToggleOptions}
+              />
+              {showOptionsMenu && (
+                <div className="absolute top-full left-0 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg min-w-[220px] z-50 py-1">
+                  <button
+                    className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
+                    onClick={() => {
+                      setShowOptionsMenu(false);
+                      // TODO: Implement export conversation
+                    }}
+                  >
+                    Export Conversation...
+                  </button>
+                  <button
+                    className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
+                    onClick={() => {
+                      setShowOptionsMenu(false);
+                      // TODO: Implement import conversation
+                    }}
+                  >
+                    Import Conversation...
+                  </button>
+                  <div className="border-t border-gray-300 my-1"></div>
+                  <button
+                    className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
+                    onClick={() => {
+                      setShowOptionsMenu(false);
+                      // TODO: Implement Posit AI
+                    }}
+                  >
+                    Posit AI...
+                  </button>
+                  <div className="border-t border-gray-300 my-1"></div>
+                  <button
+                    className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
+                    onClick={() => {
+                      setShowOptionsMenu(false);
+                      // TODO: Implement Positronic Settings
+                    }}
+                  >
+                    Positronic Settings...
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
           <button
             onClick={() => setShowApiKeyModal(true)}
             className="px-2 py-0.5 bg-[#3a7aaf] hover:bg-[#2d6290] text-white rounded transition-all text-[10px] font-medium"
@@ -458,7 +644,7 @@ function App() {
           {/* Right Bottom Panel - Code Display */}
           <div id="right-bottom-panel" className="bg-white border-l border-gray-200 overflow-auto p-4">
             {currentCode ? (
-              <pre className="bg-white text-gray-900 p-4 rounded text-base overflow-x-auto border border-gray-300">
+              <pre className="bg-white text-gray-900 p-4 rounded overflow-x-auto border border-gray-300" style={{ fontSize: '10pt' }}>
                 <code>{currentCode}</code>
               </pre>
             ) : (

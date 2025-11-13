@@ -13,7 +13,7 @@ const PROXY_API_URL = 'http://localhost:3001/api/chat';
  * @param {Array} conversationHistory - Previous messages in the conversation
  * @returns {Promise<Object>} Response containing text and any R code blocks
  */
-export async function sendMessageToClaude(apiKey, userMessage, conversationHistory = []) {
+export async function sendMessageToClaude(apiKey, userMessage, conversationHistory = [], suggestionsEnabled = false) {
   try {
     // Call the proxy server instead of Anthropic API directly
     const response = await fetch(PROXY_API_URL, {
@@ -23,6 +23,7 @@ export async function sendMessageToClaude(apiKey, userMessage, conversationHisto
       },
       body: JSON.stringify({
         apiKey: apiKey,
+        suggestionsEnabled: suggestionsEnabled,
         messages: [
           ...conversationHistory,
           {
@@ -95,43 +96,90 @@ export async function sendMessageToClaude(apiKey, userMessage, conversationHisto
  * @returns {Array} Array of objects with code and summary
  */
 function extractRCodeBlocks(text) {
-  const rCodeRegex = /```r\n([\s\S]*?)```/g;
+  // Match code blocks with 'r' or 'R' language identifier
+  // Handles both ```r and ```R with optional whitespace
+  const rCodeRegex = /```[rR]\s*\n([\s\S]*?)```/g;
   const blocks = [];
   let match;
 
   while ((match = rCodeRegex.exec(text)) !== null) {
     const code = match[1].trim();
-    const summary = generateCodeSummary(code);
-    blocks.push({ code, summary });
+    if (code.length > 0) {  // Only add non-empty code blocks
+      const { summary, description } = generateCodeSummary(code);
+      blocks.push({ code, summary, description });
+    }
   }
 
   return blocks;
 }
 
 /**
- * Generate a brief summary of R code
+ * Generate a brief summary and description of R code
  * @param {string} code - The R code
- * @returns {string} A summary of what the code does
+ * @returns {Object} Object with summary (title) and description
  */
 function generateCodeSummary(code) {
   const lines = code.split('\n').filter(line => line.trim() && !line.trim().startsWith('#'));
 
-  if (lines.length === 0) return 'R code snippet';
+  if (lines.length === 0) {
+    return {
+      summary: 'R code snippet',
+      description: 'Execute R code'
+    };
+  }
+
+  // Extract key functions used
+  const functions = [];
+  if (code.includes('ggplot')) functions.push('ggplot');
+  if (code.includes('geom_')) {
+    const geoms = code.match(/geom_\w+/g);
+    if (geoms) functions.push(...geoms.slice(0, 2));
+  }
+  if (code.includes('plot(')) functions.push('plot()');
+  if (code.includes('hist(')) functions.push('hist()');
+  if (code.includes('barplot(')) functions.push('barplot()');
+  if (code.includes('boxplot(')) functions.push('boxplot()');
+  if (code.includes('lm(')) functions.push('lm()');
+  if (code.includes('glm(')) functions.push('glm()');
+  if (code.includes('read.csv')) functions.push('read.csv()');
+  if (code.includes('read.table')) functions.push('read.table()');
 
   // Look for key functions to describe the code
   if (code.includes('ggplot') || code.includes('plot(')) {
-    return 'Create visualization/plot';
+    return {
+      summary: 'Create visualization/plot',
+      description: functions.length > 0
+        ? `Using ${functions.slice(0, 3).join(', ')}`
+        : 'Generate data visualization'
+    };
   } else if (code.includes('read.csv') || code.includes('read.table')) {
-    return 'Load and process data file';
+    return {
+      summary: 'Load and process data file',
+      description: `Read data from file${functions.length > 1 ? ' using ' + functions.join(', ') : ''}`
+    };
   } else if (code.includes('lm(') || code.includes('glm(')) {
-    return 'Perform statistical modeling';
+    return {
+      summary: 'Perform statistical modeling',
+      description: functions.length > 0
+        ? `Linear regression with ${functions.join(', ')}`
+        : 'Build statistical model'
+    };
   } else if (code.includes('summary(') || code.includes('str(')) {
-    return 'Analyze data summary statistics';
+    return {
+      summary: 'Analyze data summary statistics',
+      description: 'Compute descriptive statistics'
+    };
   } else if (code.includes('merge') || code.includes('join')) {
-    return 'Merge/join datasets';
+    return {
+      summary: 'Merge/join datasets',
+      description: 'Combine multiple data sources'
+    };
   } else {
-    // Default: use first significant line
-    const firstLine = lines[0].substring(0, 50);
-    return firstLine.length < 50 ? firstLine : firstLine + '...';
+    // Default: use first significant line as description
+    const firstLine = lines[0].substring(0, 60);
+    return {
+      summary: 'R code execution',
+      description: firstLine.length < 60 ? firstLine : firstLine + '...'
+    };
   }
 }
