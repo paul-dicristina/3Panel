@@ -60,3 +60,41 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+/* Sparkle animation with overshoot */
+@keyframes sparkle-grow {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.25);
+  }
+  100% {
+    transform: scale(1.15);
+  }
+}
+
+@keyframes sparkle-shrink {
+  0% {
+    transform: scale(1.15);
+  }
+  50% {
+    transform: scale(0.9);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.sparkle-icon {
+  transition: none;
+  transform: scale(1);
+}
+
+.suggestion-button:hover .sparkle-icon {
+  animation: sparkle-grow 0.3s ease-out forwards;
+}
+
+.suggestion-button:not(:hover) .sparkle-icon {
+  animation: sparkle-shrink 0.3s ease-out forwards;
+}

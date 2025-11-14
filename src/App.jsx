@@ -326,24 +326,6 @@ function App() {
           </div>
         </div>
 
-        {/* Suggestions (if any) */}
-        {suggestions.length > 0 && (
-          <div className="mt-3 ml-0" style={{ fontSize: '11pt' }}>
-            <p className="font-semibold text-gray-700 mb-2">Suggestions for further analysis:</p>
-            <div className="space-y-1">
-              {suggestions.map((suggestion, index) => (
-                <button
-                  key={index}
-                  onClick={() => handleSuggestionClick(suggestion)}
-                  className="block text-left text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
-                >
-                  • {suggestion}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Code cards inline (if any) */}
         {message.codeCards && message.codeCards.length > 0 && (
           <div className="mt-3 space-y-2">
@@ -360,6 +342,25 @@ function App() {
             ))}
           </div>
         )}
+
+        {/* Suggestions (if any) */}
+        {suggestions.length > 0 && (
+          <div className="mt-3 ml-0" style={{ fontSize: '11pt' }}>
+            <p className="font-semibold text-gray-700 mb-2">Suggestions for further analysis:</p>
+            <div className="space-y-1">
+              {suggestions.map((suggestion, index) => (
+                <button
+                  key={index}
+                  onClick={() => handleSuggestionClick(suggestion)}
+                  className="suggestion-button flex items-start gap-2 text-left text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+                >
+                  <img src="/sparkle.svg" alt="" className="sparkle-icon w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <span>{suggestion}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -370,19 +371,6 @@ function App() {
       return (
         <div className="flex items-center justify-center h-full text-gray-500">
           <div className="text-center">
-            <svg
-              className="w-16 h-16 mx-auto mb-4 text-gray-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-              />
-            </svg>
             <p>No output yet</p>
             <p className="text-sm mt-2">Select a code card to view its output</p>
           </div>
@@ -562,20 +550,12 @@ function App() {
             {messages.length === 0 && (
               <div className="flex items-center justify-center h-full text-gray-500">
                 <div className="text-center max-w-md">
-                  <svg
-                    className="w-20 h-20 mx-auto mb-4 text-gray-400"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
-                    />
-                  </svg>
-                  <h2 className="text-xl font-semibold mb-2">Welcome to Positronic</h2>
+                  <img
+                    src="/animated-diamond-logo2.svg"
+                    alt="Positronic"
+                    className="w-20 h-20 mx-auto mb-2"
+                  />
+                  <h2 className="text-2xl font-semibold mb-2 text-black">Positronic</h2>
                   <p className="text-sm">
                     Start a conversation with Claude to analyze data, create visualizations,
                     and generate insights using R code.
@@ -650,19 +630,6 @@ function App() {
             ) : (
               <div className="flex items-center justify-center h-full text-gray-500">
                 <div className="text-center">
-                  <svg
-                    className="w-16 h-16 mx-auto mb-4 text-gray-400"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
-                    />
-                  </svg>
                   <p>No code selected</p>
                   <p className="text-sm mt-2">Select a code card to view the code</p>
                 </div>
