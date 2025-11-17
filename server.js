@@ -302,6 +302,9 @@ app.post('/api/execute-r', async (req, res) => {
     // If plotting, wrap code to capture SVG
     if (hasPlot) {
       rCode = `
+# Set CRAN mirror for package installation
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
 # Set working directory to data folder
 setwd("${dataDir.replace(/\\/g, '/')}")
 
@@ -338,6 +341,9 @@ cat("Plot generated successfully\\n")
     } else {
       // For non-plot code, load workspace, execute, and save
       rCode = `
+# Set CRAN mirror for package installation
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
 # Set working directory to data folder
 setwd("${dataDir.replace(/\\/g, '/')}")
 
