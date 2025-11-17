@@ -132,13 +132,26 @@ function App() {
   };
 
   // Handle new conversation - reset all panels
-  const handleNewConversation = () => {
+  const handleNewConversation = async () => {
     setMessages([]);
     setCodeCards([]);
     setSelectedCardId(null);
     setCurrentOutput(null);
     setCurrentCode('');
     setInputValue('');
+
+    // Clear R workspace
+    try {
+      await fetch('http://localhost:3001/api/clear-workspace', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      console.log('R workspace cleared');
+    } catch (error) {
+      console.error('Error clearing workspace:', error);
+    }
   };
 
   // Toggle conversations menu
@@ -198,17 +211,19 @@ function App() {
 
       // Strip R code blocks from the displayed message text
       // Matches both ```r and ```R with optional whitespace
-      const messageText = response.text.replace(/```[rR]\s*\n[\s\S]*?```/g, '').trim();
+      const displayText = response.text.replace(/```[rR]\s*\n[\s\S]*?```/g, '').trim();
 
       // Debug: Log if suggestions are enabled and what the message contains
       console.log('Suggestions enabled:', suggestionsEnabled);
-      console.log('Message text after stripping code:', messageText);
+      console.log('Message text after stripping code:', displayText);
 
       // Add assistant response to chat with embedded code cards
+      // Store both original text (for API) and display text (for rendering)
       const assistantMessage = {
         id: Date.now() + 1,
         role: 'assistant',
-        content: messageText,
+        content: response.text,  // Keep original for API
+        displayContent: displayText,  // Stripped version for display
         codeCards: newCards  // Attach code cards to this message
       };
       setMessages(prev => [...prev, assistantMessage]);
@@ -306,9 +321,14 @@ function App() {
 
   // Render chat messages
   const renderMessage = (message) => {
+    // Use displayContent for assistant messages if available, otherwise use content
+    const contentToDisplay = message.role === 'assistant' && message.displayContent
+      ? message.displayContent
+      : message.content;
+
     const { mainContent, suggestions } = message.role === 'assistant'
-      ? parseSuggestions(message.content)
-      : { mainContent: message.content, suggestions: [] };
+      ? parseSuggestions(contentToDisplay)
+      : { mainContent: contentToDisplay, suggestions: [] };
 
     return (
       <div key={message.id} className="mb-4">
@@ -317,8 +337,8 @@ function App() {
           <div
             className={`inline-block max-w-[80%] p-3 rounded-lg ${
               message.role === 'user'
-                ? 'bg-blue-600 text-white'
-                : 'bg-white text-gray-800 border border-gray-200'
+                ? 'bg-[#add7fd] text-gray-800'
+                : 'bg-white text-gray-800'
             }`}
             style={{ fontSize: '11pt' }}
           >
@@ -328,7 +348,7 @@ function App() {
 
         {/* Code cards inline (if any) */}
         {message.codeCards && message.codeCards.length > 0 && (
-          <div className="mt-3 space-y-2">
+          <div className="mt-3 space-y-2 max-w-[80%]">
             {message.codeCards.map(card => (
               <CodeCard
                 key={card.id}
@@ -451,7 +471,7 @@ function App() {
   return (
     <div className="h-screen flex flex-col bg-gray-100">
       {/* Header */}
-      <header className="bg-[#f5f8f9] h-[24px] border-b border-[#d7dadc]">
+      <header className="bg-[#edeff0] h-[24px] border-b border-[#d7dadc]">
         <div className="flex items-center justify-between h-full px-3">
           <div className="flex items-center gap-2 h-full relative">
             <img
@@ -534,7 +554,7 @@ function App() {
           </div>
           <button
             onClick={() => setShowApiKeyModal(true)}
-            className="px-2 py-0.5 bg-[#3a7aaf] hover:bg-[#2d6290] text-white rounded transition-all text-[10px] font-medium"
+            className="px-2 py-0.5 bg-[#edeff0] hover:bg-[#d7dadc] text-[#3a7aaf] border border-[#d7dadc] rounded transition-all text-[10px] font-medium"
           >
             Update API Key
           </button>
@@ -549,17 +569,45 @@ function App() {
           <div className="flex-1 overflow-y-auto p-4">
             {messages.length === 0 && (
               <div className="flex items-center justify-center h-full text-gray-500">
-                <div className="text-center max-w-md">
+                <div className="text-center max-w-2xl px-16">
                   <img
-                    src="/animated-diamond-logo2.svg"
+                    key={messages.length}
+                    src={`/animated-diamond-logo2.svg?t=${Date.now()}`}
                     alt="Positronic"
-                    className="w-20 h-20 mx-auto mb-2"
+                    className="w-[160px] h-[160px] mx-auto mb-[-40px]"
                   />
-                  <h2 className="text-2xl font-semibold mb-2 text-black">Positronic</h2>
-                  <p className="text-sm">
-                    Start a conversation with Claude to analyze data, create visualizations,
+                  <h2 className="text-2xl font-semibold mb-2 text-[#5d5d66]">Positronic</h2>
+                  <p className="text-sm mb-6">
+                    Start a conversation with Positronic to analyze data, create visualizations,
                     and generate insights using R code.
                   </p>
+
+                  {/* Startup suggestions */}
+                  <div className="mt-4 text-left" style={{ fontSize: '11pt' }}>
+                    <div className="space-y-[5.3px]">
+                      <button
+                        onClick={() => setInputValue('Create a dot plot for mileage vs horsepower using mtcars color the dots on a gradient from red to blue')}
+                        className="suggestion-button flex items-start gap-2 text-left text-blue-600 hover:text-[#3300d7] hover:underline cursor-pointer w-full"
+                      >
+                        <img src="/sparkle.svg" alt="" className="sparkle-icon w-4 h-4 flex-shrink-0 mt-0.5" />
+                        <span>Create a dot plot for mileage vs horsepower using mtcars color the dots on a gradient from red to blue</span>
+                      </button>
+                      <button
+                        onClick={() => setInputValue('Show the first 25 rows of mtcars')}
+                        className="suggestion-button flex items-start gap-2 text-left text-blue-600 hover:text-[#3300d7] hover:underline cursor-pointer w-full"
+                      >
+                        <img src="/sparkle.svg" alt="" className="sparkle-icon w-4 h-4 flex-shrink-0 mt-0.5" />
+                        <span>Show the first 25 rows of mtcars</span>
+                      </button>
+                      <button
+                        onClick={() => setInputValue('Load https://github.com/datasets/population/blob/main/data/population.csv into a dataset named pop and show the first 25 rows')}
+                        className="suggestion-button flex items-start gap-2 text-left text-blue-600 hover:text-[#3300d7] hover:underline cursor-pointer w-full"
+                      >
+                        <img src="/sparkle.svg" alt="" className="sparkle-icon w-4 h-4 flex-shrink-0 mt-0.5" />
+                        <span>Load https://github.com/datasets/population/blob/main/data/population.csv into a dataset named pop and show the first 25 rows</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -568,8 +616,8 @@ function App() {
 
             {isLoading && (
               <div className="flex items-center gap-2 text-gray-500 mb-4">
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
-                <span>Claude is thinking...</span>
+                <img src="/animated-diamond-loop.svg" alt="" className="w-[34px] h-[34px]" />
+                <span>Positronic is thinking...</span>
               </div>
             )}
           </div>

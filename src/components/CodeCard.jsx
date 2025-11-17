@@ -26,10 +26,7 @@ const CodeCard = ({ id, summary, description, code, isSelected, onClick }) => {
       onClick={() => onClick(id)}
       className={`
         p-4 mb-3 cursor-pointer transition-all bg-[#f5f8f9]
-        ${isSelected
-          ? 'border-2 border-blue-500'
-          : 'border-2 border-gray-300 hover:border-gray-400'
-        }
+        ${isSelected ? 'border-2 border-blue-500' : ''}
       `}
       style={{ borderRadius: '24px 8px 8px 8px' }}
     >

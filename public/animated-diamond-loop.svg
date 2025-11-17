@@ -1,0 +1,73 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Left square (rotated 45 degrees) - rotates counter-clockwise -->
+  <g transform="translate(-15 0)">
+    <rect x="50" y="50" width="100" height="100" 
+          fill="none" 
+          stroke="#5d5d66" 
+          stroke-width="9.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          rx="3"
+          ry="3"
+          transform="rotate(45 100 100)">
+      <animateTransform
+        attributeName="transform"
+        type="rotate"
+        values="45 100 100; -45 100 100; -45 100 100; -135 100 100; -135 100 100; -225 100 100; -225 100 100; -315 100 100; -315 100 100"
+        dur="6.04s"
+        repeatCount="indefinite"
+        keyTimes="0; 0.0745; 0.25; 0.3245; 0.5; 0.5745; 0.75; 0.8245; 1"
+        calcMode="spline"
+        keySplines="0.42 0 0.58 1; 0 0 1 1; 0.42 0 0.58 1; 0 0 1 1; 0.42 0 0.58 1; 0 0 1 1; 0.42 0 0.58 1; 0 0 1 1"/>
+    </rect>
+  </g>
+  
+  <!-- Right square (rotated 45 degrees) - rotates clockwise -->
+  <g transform="translate(15 0)">
+    <rect x="50" y="50" width="100" height="100" 
+          fill="none" 
+          stroke="#5d5d66" 
+          stroke-width="9.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          rx="3"
+          ry="3"
+          transform="rotate(45 100 100)">
+      <animateTransform
+        attributeName="transform"
+        type="rotate"
+        values="45 100 100; 135 100 100; 135 100 100; 225 100 100; 225 100 100; 315 100 100; 315 100 100; 405 100 100; 405 100 100"
+        dur="6.04s"
+        repeatCount="indefinite"
+        keyTimes="0; 0.0745; 0.25; 0.3245; 0.5; 0.5745; 0.75; 0.8245; 1"
+        calcMode="spline"
+        keySplines="0.42 0 0.58 1; 0 0 1 1; 0.42 0 0.58 1; 0 0 1 1; 0.42 0 0.58 1; 0 0 1 1; 0.42 0 0.58 1; 0 0 1 1"/>
+    </rect>
+  </g>
+  
+  <!-- Center star shape - pulses subtly during every pause -->
+  <g transform="translate(100 100)">
+    <animateTransform
+      attributeName="transform"
+      type="scale"
+      values="1; 1; 0.75; 1; 1; 1; 0.75; 1; 1; 1; 0.75; 1; 1; 1; 0.75; 1; 1"
+      dur="6.04s"
+      repeatCount="indefinite"
+      keyTimes="0; 0.0745; 0.125; 0.2; 0.25; 0.3245; 0.375; 0.45; 0.5; 0.5745; 0.625; 0.7; 0.75; 0.8245; 0.875; 0.95; 1"
+      calcMode="spline"
+      keySplines="0 0 1 1; 0.42 0 0.58 1; 0.42 0 0.58 1; 0 0 1 1; 0 0 1 1; 0.42 0 0.58 1; 0.42 0 0.58 1; 0 0 1 1; 0 0 1 1; 0.42 0 0.58 1; 0.42 0 0.58 1; 0 0 1 1; 0 0 1 1; 0.42 0 0.58 1; 0.42 0 0.58 1; 0 0 1 1"
+      additive="sum"/>
+    <animateTransform
+      attributeName="transform"
+      type="translate"
+      values="0 0; 0 0; 0 0; 0 0; 0 0; 0 0; 0 0; 0 0; 0 0; 0 0; 0 0; 0 0; 0 0; 0 0; 0 0; 0 0; 0 0"
+      dur="6.04s"
+      repeatCount="indefinite"
+      keyTimes="0; 0.0745; 0.125; 0.2; 0.25; 0.3245; 0.375; 0.45; 0.5; 0.5745; 0.625; 0.7; 0.75; 0.8245; 0.875; 0.95; 1"
+      additive="sum"/>
+    
+    <!-- Four-pointed star made from curved paths with concave sides -->
+    <path d="M 0,-30 C 10,-10 10,-10 30,0 C 10,10 10,10 0,30 C -10,10 -10,10 -30,0 C -10,-10 -10,-10 0,-30 Z" 
+          fill="#5d5d66"/>
+  </g>
+</svg>

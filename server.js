@@ -61,12 +61,42 @@ app.post('/api/chat', async (req, res) => {
 2. Generate R code to accomplish the task
 3. Wrap all R code in markdown code blocks with the 'r' language identifier
 
-IMPORTANT FORMATTING RULES:
-- Keep your text response BRIEF and conversational
+CRITICAL FORMATTING RULES:
+- Keep your text response BRIEF and conversational (1-2 sentences maximum)
 - Do NOT describe what the code does in detail - the code card will show that
 - Do NOT explain the code output - users will see it in the output panel
+- Do NOT include ANY data, numbers, statistics, or results in your text response
+- Do NOT show dataset rows, summaries, or any computed values in your text
+- NEVER print or display data outside of R code blocks
 - Put ALL executable R code in code blocks
 - Each code block should be complete and self-contained
+- The R code will be executed automatically and results will appear in the output panel
+
+CRITICAL - R WORKSPACE PERSISTENCE - READ CAREFULLY:
+The R environment has PERSISTENT WORKSPACE across all code executions in the same conversation:
+
+KEY RULES:
+1. ALL variables, datasets, and objects persist automatically between code blocks
+2. If the user loaded data in ANY previous message in this conversation, it STILL EXISTS in the workspace
+3. BEFORE loading data, CHECK THE CONVERSATION HISTORY - if data was already loaded, DO NOT reload it
+4. Libraries (ggplot2, dplyr, etc.) DO NOT persist - always call library() when needed
+5. When analyzing data that was loaded earlier, just use the variable name directly
+
+CORRECT workflow example:
+User: "Load population data from URL into variable pop"
+You: Generate code that loads: pop <- read.csv(url(...))
+
+User: "Show me the first 20 rows"
+You: Generate code: head(pop, 20)   <-- DO NOT reload pop, it exists!
+
+User: "Create a plot of Canada's population"
+You: Generate code: library(ggplot2); ggplot(subset(pop, Country.Name=="Canada"), ...)  <-- Use existing pop!
+
+WRONG approach (DO NOT DO THIS):
+User: "Create a plot of Canada's population"
+You: pop <- read.csv(url(...))  <-- WRONG! Data already exists from earlier!
+
+Check conversation history first. If data was loaded before, reuse it. Only load data if it's the FIRST time.
 
 Example response format:
 "I'll create that visualization for you.
@@ -83,7 +113,38 @@ ggplot(data, aes(x=variable1, y=variable2)) +
   labs(title="Scatter Plot", x="Variable 1", y="Variable 2")
 \`\`\`"
 
-The mtcars dataset is pre-loaded for you to use in all code.`;
+DATA ACCESS:
+- The mtcars dataset is pre-loaded and available in all code
+- The working directory is set to the 'data' folder in the project
+- To load external CSV files, users must first place them in the 'data' folder
+- Then use read.csv('filename.csv') to load them (no path needed)
+- You can also use R's built-in datasets: iris, cars, ToothGrowth, PlantGrowth, etc.
+- For remote data, you can use URLs: read.csv(url('https://example.com/data.csv'))
+
+CRITICAL - WORKING WITH EXTERNAL DATA:
+When working with external CSV files or URLs, you MUST follow this exact pattern:
+
+Step 1: Load the data
+Step 2: Print column names using names(dataframe) or str(dataframe)
+Step 3: Use the EXACT column names from step 2 in your analysis
+
+NEVER assume column names! R converts spaces to dots (e.g., "Country Name" → "Country.Name")
+
+Example:
+\`\`\`r
+# Step 1: Load data
+data <- read.csv(url('http://example.com/data.csv'))
+
+# Step 2: Check actual column names
+print(names(data))
+print(str(data))
+
+# Step 3: Use exact column names from step 2
+# If names() shows "Country.Name", use that exactly:
+result <- data %>% filter(Country.Name == "Canada")
+\`\`\`
+
+IMPORTANT: Include the names() or str() command in EVERY code block that loads external data!`;
 
     // Add suggestions instructions if enabled
     if (suggestionsEnabled) {
@@ -147,6 +208,8 @@ The suggestions should be relevant to the dataset that was just analyzed and off
  */
 app.post('/api/execute-r', async (req, res) => {
   const tempDir = join(tmpdir(), '3panel-r-execution');
+  const dataDir = join(process.cwd(), 'data'); // Use project's data directory
+  const workspacePath = join(tempDir, 'workspace.RData'); // Persistent workspace
   const timestamp = Date.now();
   const scriptPath = join(tempDir, `script_${timestamp}.R`);
   const svgPath = join(tempDir, `plot_${timestamp}.svg`);
@@ -174,11 +237,23 @@ app.post('/api/execute-r', async (req, res) => {
                      code.includes('barplot') ||
                      code.includes('boxplot');
 
+    console.log('=== R Code Execution ===');
+    console.log('Has plot:', hasPlot);
+    console.log('User code:', code.substring(0, 200));
+
     let rCode = code;
 
     // If plotting, wrap code to capture SVG
     if (hasPlot) {
       rCode = `
+# Set working directory to data folder
+setwd("${dataDir.replace(/\\/g, '/')}")
+
+# Load previous workspace if it exists
+if (file.exists("${workspacePath.replace(/\\/g, '/')}")) {
+  load("${workspacePath.replace(/\\/g, '/')}")
+}
+
 # Load mtcars dataset
 data(mtcars)
 
@@ -198,17 +273,31 @@ tryCatch({
 # Close device
 dev.off()
 
+# Save workspace for next execution
+save.image("${workspacePath.replace(/\\/g, '/')}")
+
 # Print success message
 cat("Plot generated successfully\\n")
 `;
     } else {
-      // For non-plot code, just load mtcars and execute
+      // For non-plot code, load workspace, execute, and save
       rCode = `
+# Set working directory to data folder
+setwd("${dataDir.replace(/\\/g, '/')}")
+
+# Load previous workspace if it exists
+if (file.exists("${workspacePath.replace(/\\/g, '/')}")) {
+  load("${workspacePath.replace(/\\/g, '/')}")
+}
+
 # Load mtcars dataset
 data(mtcars)
 
 # Execute user code
 ${code}
+
+# Save workspace for next execution
+save.image("${workspacePath.replace(/\\/g, '/')}")
 `;
     }
 
@@ -242,8 +331,21 @@ ${code}
         // If plotting, read the SVG file
         if (hasPlot) {
           try {
-            const { readFile } = await import('fs/promises');
+            console.log('Attempting to read SVG from:', svgPath);
+            const { readFile, stat } = await import('fs/promises');
+
+            // Check if SVG file exists
+            try {
+              const stats = await stat(svgPath);
+              console.log('SVG file exists, size:', stats.size, 'bytes');
+            } catch (statError) {
+              console.error('SVG file does not exist:', svgPath);
+              result.error = 'Plot file was not created';
+              return;
+            }
+
             const svgContent = await readFile(svgPath, 'utf8');
+            console.log('SVG content length:', svgContent.length);
             result.plots.push({
               type: 'image',
               data: svgContent
@@ -256,6 +358,10 @@ ${code}
             result.error = 'Plot generation failed';
           }
         }
+
+        console.log('R execution stdout:', stdout);
+        console.log('R execution stderr:', stderr);
+        console.log('Result:', { hasPlots: result.plots.length, hasError: !!result.error });
 
         // Clean up script file
         await unlink(scriptPath).catch(() => {});
@@ -282,6 +388,26 @@ ${code}
       tables: [],
       error: error.message || 'An error occurred while executing R code'
     });
+  }
+});
+
+/**
+ * POST /api/clear-workspace
+ * Clear the R workspace (for new conversations)
+ */
+app.post('/api/clear-workspace', async (req, res) => {
+  try {
+    const tempDir = join(tmpdir(), '3panel-r-execution');
+    const workspacePath = join(tempDir, 'workspace.RData');
+
+    // Delete workspace file if it exists
+    await unlink(workspacePath).catch(() => {});
+
+    console.log('R workspace cleared');
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error clearing workspace:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 

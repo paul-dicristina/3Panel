@@ -9,7 +9,9 @@
       "Bash(pkill:*)",
       "Bash(awk:*)",
       "Bash(npm run dev:*)",
-      "Bash(R:*)"
+      "Bash(R:*)",
+      "Read(//private/tmp/**)",
+      "Bash(npm search:*)"
     ],
     "deny": [],
     "ask": []
