@@ -190,12 +190,28 @@ function App() {
     setMessages(prev => [...prev, newUserMessage]);
 
     try {
-      // Send to Claude API
+      // Collect recent plot images from code cards (last 3 plots for context)
+      const recentPlots = [];
+      for (const card of codeCards.slice(-3)) {
+        if (card.output && card.output.plots) {
+          for (const plot of card.output.plots) {
+            if (plot.pngBase64) {
+              recentPlots.push({
+                base64Data: plot.pngBase64,
+                summary: card.summary
+              });
+            }
+          }
+        }
+      }
+
+      // Send to Claude API with plot images
       const response = await sendMessageToClaude(
         apiKey,
         userMessage,
         messages.map(m => ({ role: m.role, content: m.content })),
-        suggestionsEnabled
+        suggestionsEnabled,
+        recentPlots  // Pass recent plots for Claude to see
       );
 
       // Create code cards for any R code blocks

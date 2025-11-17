@@ -12,13 +12,15 @@ import { exec } from 'child_process';
 import { writeFile, unlink, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import sharp from 'sharp';
 
 const app = express();
 const PORT = 3001;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));  // Increase limit for base64 images
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -35,7 +37,7 @@ app.get('/health', (req, res) => {
  */
 app.post('/api/chat', async (req, res) => {
   try {
-    const { apiKey, messages, suggestionsEnabled } = req.body;
+    const { apiKey, messages, suggestionsEnabled, recentPlots } = req.body;
 
     if (!apiKey) {
       return res.status(400).json({
@@ -162,13 +164,67 @@ IMPORTANT: After providing your response and R code, if the user's request invol
 The suggestions should be relevant to the dataset that was just analyzed and offer meaningful next steps the user could take. If no dataset was referenced in the request, do NOT include suggestions.`;
     }
 
+    // Add vision instructions if plots are included
+    if (recentPlots && recentPlots.length > 0) {
+      systemPrompt += `
+
+IMPORTANT: You can now SEE the plots that were generated! The user has included ${recentPlots.length} recent plot(s) with their message. You can analyze the visualizations and provide feedback on:
+- Colors, styling, and aesthetics
+- Data representation and clarity
+- Suggestions for improvements
+- Answering questions about what you see in the plot
+
+When the user asks you to modify or improve a plot, you can see exactly what it looks like and make informed adjustments.`;
+    }
+
+    // Format messages with vision content blocks if plots are included
+    let formattedMessages = messages;
+    if (recentPlots && recentPlots.length > 0) {
+      // Transform the last user message to include images
+      formattedMessages = messages.map((msg, index) => {
+        // Only modify the last user message
+        if (msg.role === 'user' && index === messages.length - 1) {
+          const contentBlocks = [];
+
+          // Add plot images first
+          for (const plot of recentPlots) {
+            contentBlocks.push({
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: 'image/png',
+                data: plot.base64Data
+              }
+            });
+            // Add a text label for the plot
+            contentBlocks.push({
+              type: 'text',
+              text: `[Plot: ${plot.summary}]`
+            });
+          }
+
+          // Add the user's message text
+          contentBlocks.push({
+            type: 'text',
+            text: msg.content
+          });
+
+          return {
+            role: msg.role,
+            content: contentBlocks
+          };
+        }
+        return msg;
+      });
+    }
+
     // Call Claude API
     // Using Claude 3 Opus - the most powerful model for best code generation
     const message = await anthropic.messages.create({
       model: 'claude-3-opus-20240229',
       max_tokens: 4096,
       system: systemPrompt,
-      messages: messages
+      messages: formattedMessages
     });
 
     // Return the response
@@ -346,9 +402,23 @@ save.image("${workspacePath.replace(/\\/g, '/')}")
 
             const svgContent = await readFile(svgPath, 'utf8');
             console.log('SVG content length:', svgContent.length);
+
+            // Convert SVG to PNG for Claude's vision
+            let pngBase64 = null;
+            try {
+              const pngBuffer = await sharp(Buffer.from(svgContent))
+                .png()
+                .toBuffer();
+              pngBase64 = pngBuffer.toString('base64');
+              console.log('PNG conversion successful, base64 length:', pngBase64.length);
+            } catch (conversionError) {
+              console.error('Error converting SVG to PNG:', conversionError);
+            }
+
             result.plots.push({
               type: 'image',
-              data: svgContent
+              data: svgContent,
+              pngBase64: pngBase64  // Add base64 PNG for Claude's vision
             });
 
             // Clean up SVG file

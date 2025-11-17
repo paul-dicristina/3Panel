@@ -13,7 +13,7 @@ const PROXY_API_URL = 'http://localhost:3001/api/chat';
  * @param {Array} conversationHistory - Previous messages in the conversation
  * @returns {Promise<Object>} Response containing text and any R code blocks
  */
-export async function sendMessageToClaude(apiKey, userMessage, conversationHistory = [], suggestionsEnabled = false) {
+export async function sendMessageToClaude(apiKey, userMessage, conversationHistory = [], suggestionsEnabled = false, recentPlots = []) {
   try {
     // Call the proxy server instead of Anthropic API directly
     const response = await fetch(PROXY_API_URL, {
@@ -24,6 +24,7 @@ export async function sendMessageToClaude(apiKey, userMessage, conversationHisto
       body: JSON.stringify({
         apiKey: apiKey,
         suggestionsEnabled: suggestionsEnabled,
+        recentPlots: recentPlots,  // Include plot images for Claude's vision
         messages: [
           ...conversationHistory,
           {
