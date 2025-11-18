@@ -639,7 +639,7 @@ function App() {
           </div>
 
           {/* Input area */}
-          <div className="border-t border-gray-200 p-4 bg-gray-50">
+          <div className="p-4 bg-white">
             <div className="relative">
               <textarea
                 ref={textareaRef}
@@ -647,15 +647,15 @@ function App() {
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyPress={handleKeyPress}
                 placeholder="Ask Positronic..."
-                className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none bg-white overflow-hidden"
-                style={{ fontSize: '11pt' }}
+                className="w-full px-3 py-2 pr-12 border border-[#616161] rounded-lg focus:outline-none resize-none bg-white overflow-hidden"
+                style={{ fontSize: '11pt', minHeight: 'calc(2.5rem + 1px)' }}
                 rows="1"
                 disabled={isLoading}
               />
               <button
                 onClick={handleSendMessage}
                 disabled={isLoading || !inputValue.trim()}
-                className="absolute right-2 top-2 w-8 h-8 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
+                className="absolute right-1 top-1 w-8 h-8 rounded-md text-white bg-[#3a7aaf] hover:bg-[#2d6290] disabled:bg-[#c0c0c0] disabled:cursor-not-allowed transition-colors flex items-center justify-center"
               >
                 <svg
                   className="w-4 h-4"
@@ -667,7 +667,7 @@ function App() {
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    strokeWidth={2}
+                    strokeWidth={3}
                     d="M5 10l7-7m0 0l7 7m-7-7v18"
                   />
                 </svg>

@@ -9,7 +9,7 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f1f1;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
@@ -19,6 +19,16 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: #555;
+}
+
+/* Interaction panel specific scrollbar */
+#left-panel ::-webkit-scrollbar-thumb {
+  background: #c0c0c0;
+  border-radius: 4px;
+}
+
+#left-panel ::-webkit-scrollbar-thumb:hover {
+  background: #a0a0a0;
 }
 
 /* Split.js gutter styling */
