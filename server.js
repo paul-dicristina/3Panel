@@ -22,6 +22,9 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));  // Increase limit for base64 images
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// Serve widget HTML files from temp directory
+app.use('/widgets', express.static(join(tmpdir(), '3panel-r-execution')));
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'Proxy server is running' });
@@ -161,7 +164,12 @@ IMPORTANT: After providing your response and R code, if the user's request invol
 - Suggestion 4
 - Suggestion 5
 
-The suggestions should be relevant to the dataset that was just analyzed and offer meaningful next steps the user could take. If no dataset was referenced in the request, do NOT include suggestions.`;
+CRITICAL REQUIREMENTS FOR SUGGESTIONS:
+1. Base suggestions ONLY on columns/variables that have been explicitly shown or used in the conversation
+2. Do NOT assume the dataset contains additional columns that weren't mentioned
+3. If you're unsure what columns exist, suggest exploring the dataset structure first (e.g., "View column names and data types")
+4. Focus on different analysis angles using the known columns (e.g., different visualizations, statistical tests, groupings, time periods)
+5. If no dataset was referenced in the request, do NOT include suggestions`;
     }
 
     // Add vision instructions if plots are included
@@ -269,6 +277,7 @@ app.post('/api/execute-r', async (req, res) => {
   const timestamp = Date.now();
   const scriptPath = join(tempDir, `script_${timestamp}.R`);
   const svgPath = join(tempDir, `plot_${timestamp}.svg`);
+  const htmlPath = join(tempDir, `widget_${timestamp}.html`);
 
   try {
     const { code } = req.body;
@@ -316,6 +325,15 @@ if (file.exists("${workspacePath.replace(/\\/g, '/')}")) {
 # Load mtcars dataset
 data(mtcars)
 
+# Auto-load commonly used packages
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(ggplot2)
+  library(tidyr)
+  if (requireNamespace("maps", quietly = TRUE)) library(maps)
+  if (requireNamespace("gt", quietly = TRUE)) library(gt)
+})
+
 # Load svglite library
 library(svglite)
 
@@ -355,8 +373,71 @@ if (file.exists("${workspacePath.replace(/\\/g, '/')}")) {
 # Load mtcars dataset
 data(mtcars)
 
-# Execute user code
-${code}
+# Auto-load commonly used packages
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(ggplot2)
+  library(tidyr)
+  if (requireNamespace("maps", quietly = TRUE)) library(maps)
+  if (requireNamespace("gt", quietly = TRUE)) library(gt)
+})
+
+# Execute user code and check return value type first
+.result <- withVisible({
+  ${code}
+})
+
+.value <- .result$value
+.visible <- .result$visible
+
+# Check if result is an htmlwidget, formattable, or gt table
+.is_widget <- FALSE
+.widget_obj <- NULL
+.is_gt <- FALSE
+
+if (!is.null(.value)) {
+  # Check if it's already an htmlwidget
+  if (inherits(.value, "htmlwidget")) {
+    .is_widget <- TRUE
+    .widget_obj <- .value
+  }
+  # Check if it's a formattable object
+  else if (inherits(.value, "formattable")) {
+    if (requireNamespace("formattable", quietly = TRUE)) {
+      .is_widget <- TRUE
+      .widget_obj <- formattable::as.htmlwidget(.value)
+    }
+  }
+  # Check if it's a gt table
+  else if (inherits(.value, "gt_tbl")) {
+    .is_gt <- TRUE
+  }
+  # Check if it has a knit_print method (other htmlwidget-like objects)
+  else if (any(c("datatables", "DT") %in% class(.value))) {
+    .is_widget <- TRUE
+    .widget_obj <- .value
+  }
+}
+
+# Handle gt tables, widgets, or regular output
+if (.is_gt) {
+  # gt tables output HTML directly, not as widgets
+  if (requireNamespace("gt", quietly = TRUE)) {
+    gt::gtsave(.value, "${htmlPath.replace(/\\/g, '/')}")
+    cat("HTML_WIDGET_GENERATED\\n")
+  }
+} else if (.is_widget && !is.null(.widget_obj)) {
+  # Save the widget and suppress automatic printing
+  if (requireNamespace("htmlwidgets", quietly = TRUE)) {
+    htmlwidgets::saveWidget(.widget_obj, "${htmlPath.replace(/\\/g, '/')}", selfcontained = FALSE)
+    cat("HTML_WIDGET_GENERATED\\n")
+  }
+} else {
+  # Not a widget - let it print normally if it was visible
+  if (.visible && !is.null(.value)) {
+    print(.value)
+  }
+}
 
 # Save workspace for next execution
 save.image("${workspacePath.replace(/\\/g, '/')}")
@@ -376,10 +457,16 @@ save.image("${workspacePath.replace(/\\/g, '/')}")
       };
 
       try {
-        // Capture stdout/stderr (excluding "Plot generated successfully" message)
+        // Capture stdout/stderr (excluding "Plot generated successfully" and "HTML_WIDGET_GENERATED" messages)
         if (stdout) {
-          const cleanOutput = stdout.replace(/Plot generated successfully\n?/g, '').trim();
+          const cleanOutput = stdout
+            .replace(/Plot generated successfully\n?/g, '')
+            .replace(/HTML_WIDGET_GENERATED\n?/g, '')
+            .trim();
           if (cleanOutput) result.output += cleanOutput;
+
+          // Keep raw stdout for debugging
+          console.log('Raw stdout:', stdout);
         }
         if (stderr && !stderr.includes('WARNING')) {
           result.output += '\n' + stderr;
@@ -400,14 +487,28 @@ save.image("${workspacePath.replace(/\\/g, '/')}")
             try {
               const stats = await stat(svgPath);
               console.log('SVG file exists, size:', stats.size, 'bytes');
+
+              // If SVG is empty or very small, there was likely an error
+              if (stats.size < 100) {
+                console.error('SVG file is empty or too small, likely an error occurred');
+                result.error = stdout || 'Plot generation failed - empty output';
+                // Clean up empty SVG file
+                await unlink(svgPath).catch(() => {});
+                return;
+              }
             } catch (statError) {
               console.error('SVG file does not exist:', svgPath);
               result.error = 'Plot file was not created';
               return;
             }
 
-            const svgContent = await readFile(svgPath, 'utf8');
+            let svgContent = await readFile(svgPath, 'utf8');
             console.log('SVG content length:', svgContent.length);
+
+            // Make SVG responsive by removing fixed width/height attributes
+            // Keep viewBox for aspect ratio, remove width/height to allow CSS scaling
+            svgContent = svgContent.replace(/<svg([^>]*)\swidth="[^"]*"/, '<svg$1');
+            svgContent = svgContent.replace(/<svg([^>]*)\sheight="[^"]*"/, '<svg$1');
 
             // Convert SVG to PNG for Claude's vision
             let pngBase64 = null;
@@ -432,6 +533,39 @@ save.image("${workspacePath.replace(/\\/g, '/')}")
           } catch (svgError) {
             console.error('Error reading SVG:', svgError);
             result.error = 'Plot generation failed';
+          }
+        }
+
+        // Check if HTML widget was generated
+        if (stdout && stdout.includes('HTML_WIDGET_GENERATED')) {
+          try {
+            console.log('Attempting to read HTML widget from:', htmlPath);
+            const { readFile, stat, readdir } = await import('fs/promises');
+            const { dirname, basename, join } = await import('path');
+
+            // Check if HTML file exists
+            try {
+              const stats = await stat(htmlPath);
+              console.log('HTML file exists, size:', stats.size, 'bytes');
+            } catch (statError) {
+              console.error('HTML file does not exist:', htmlPath);
+            }
+
+            // Instead of inlining, serve the HTML file via Express
+            const htmlFilename = basename(htmlPath);
+            const widgetUrl = `/widgets/${htmlFilename}`;
+
+            console.log('Widget URL:', widgetUrl);
+
+            result.plots.push({
+              type: 'html',
+              url: widgetUrl
+            });
+
+            // Don't clean up the HTML file - it needs to be served
+            // It will be cleaned up on next execution or server restart
+          } catch (htmlError) {
+            console.error('Error reading HTML widget:', htmlError);
           }
         }
 

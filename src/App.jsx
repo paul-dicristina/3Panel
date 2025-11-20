@@ -35,11 +35,14 @@ function App() {
   const [suggestionsEnabled, setSuggestionsEnabled] = useState(false);
   const [showConversationsMenu, setShowConversationsMenu] = useState(false);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
+  const [isOutputPanelHovered, setIsOutputPanelHovered] = useState(false);
+  const [favoritedCardIds, setFavoritedCardIds] = useState(new Set());
 
   // Refs for resizable panels
   const splitInstanceRef = useRef(null);
   const splitVerticalInstanceRef = useRef(null);
   const textareaRef = useRef(null);
+  const leftPanelRef = useRef(null);
 
   // Load API key from localStorage on mount
   useEffect(() => {
@@ -123,6 +126,47 @@ function App() {
       }
     };
   }, []);
+
+  // Handle keyboard navigation for code cards
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Only handle if focus is not in textarea and we have code cards
+      if (document.activeElement === textareaRef.current || codeCards.length === 0) {
+        return;
+      }
+
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+
+        const currentIndex = codeCards.findIndex(card => card.id === selectedCardId);
+        let newIndex;
+
+        if (e.key === 'ArrowDown') {
+          // Move down (next card)
+          newIndex = currentIndex === -1 ? 0 : Math.min(currentIndex + 1, codeCards.length - 1);
+        } else {
+          // Move up (previous card)
+          newIndex = currentIndex === -1 ? codeCards.length - 1 : Math.max(currentIndex - 1, 0);
+        }
+
+        const newCard = codeCards[newIndex];
+        if (newCard) {
+          handleCardSelect(newCard.id);
+        }
+      }
+    };
+
+    const leftPanel = leftPanelRef.current;
+    if (leftPanel) {
+      leftPanel.addEventListener('keydown', handleKeyDown);
+    }
+
+    return () => {
+      if (leftPanel) {
+        leftPanel.removeEventListener('keydown', handleKeyDown);
+      }
+    };
+  }, [codeCards, selectedCardId]);
 
   // Handle API key save
   const handleSaveApiKey = (key) => {
@@ -286,6 +330,21 @@ function App() {
     }
   };
 
+  // Toggle favorite status for currently selected card
+  const handleToggleFavorite = () => {
+    if (selectedCardId) {
+      setFavoritedCardIds(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(selectedCardId)) {
+          newSet.delete(selectedCardId);
+        } else {
+          newSet.add(selectedCardId);
+        }
+        return newSet;
+      });
+    }
+  };
+
   // Execute R code and update output
   const executeSelectedCode = async (code, cardId) => {
     try {
@@ -414,70 +473,98 @@ function App() {
       );
     }
 
+    const isFavorited = selectedCardId && favoritedCardIds.has(selectedCardId);
+    const hasPlots = currentOutput.plots && currentOutput.plots.length > 0;
+
     return (
-      <div className="h-full overflow-auto p-4">
-        {/* Error display */}
+      <div className="absolute inset-0 overflow-hidden p-1">
+        {/* Favorite border overlay */}
+        <div className={`absolute inset-1 border-4 rounded-lg pointer-events-none transition-all duration-500 ${isFavorited ? 'border-[#72ccb6]' : 'border-transparent'}`} style={{ zIndex: 10 }}></div>
+
+        {/* Error display - absolutely positioned at top */}
         {currentOutput.error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+          <div className="absolute top-2 left-2 right-2 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded z-20">
             <strong>Error:</strong> {currentOutput.error}
           </div>
         )}
 
-        {/* Plots */}
-        {currentOutput.plots && currentOutput.plots.length > 0 && (
-          <div className="space-y-4">
-            {currentOutput.plots.map((plot, index) => (
-              <div
-                key={index}
-                className="border border-gray-300 rounded p-2 bg-white"
-                dangerouslySetInnerHTML={{ __html: plot.data }}
-              />
-            ))}
+        {/* Plots - fill entire space with absolute positioning */}
+        {hasPlots && (
+          <div className="absolute inset-1">
+            {currentOutput.plots.map((plot, index) => {
+              // Handle HTML widgets differently from SVG plots
+              if (plot.type === 'html') {
+                return (
+                  <iframe
+                    key={index}
+                    src={plot.url ? `http://localhost:3001${plot.url}` : undefined}
+                    srcDoc={plot.url ? undefined : plot.data}
+                    style={{ width: '100%', height: '100%', border: 'none' }}
+                    title="HTML Widget Output"
+                  />
+                );
+              } else {
+                // SVG plot
+                return (
+                  <div
+                    key={index}
+                    className="plot-container"
+                    style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    dangerouslySetInnerHTML={{ __html: plot.data }}
+                  />
+                );
+              }
+            })}
           </div>
         )}
 
-        {/* Text output (only show if no plots) */}
-        {currentOutput.output && (!currentOutput.plots || currentOutput.plots.length === 0) && (
-          <pre className="bg-gray-50 p-4 rounded mb-4 overflow-x-auto" style={{ fontSize: '11pt' }}>
-            {currentOutput.output}
-          </pre>
-        )}
+        {/* Other content - wrapped with padding when no plots */}
+        {!hasPlots && (
+          <div className="h-full p-4 overflow-auto">
+            {/* Text output */}
+            {currentOutput.output && (
+              <pre className="bg-gray-50 p-4 rounded mb-4 overflow-x-auto" style={{ fontSize: '11pt' }}>
+                {currentOutput.output}
+              </pre>
+            )}
 
-        {/* Tables */}
-        {currentOutput.tables && currentOutput.tables.length > 0 && (
-          <div className="space-y-4" style={{ fontSize: '11pt' }}>
-            {currentOutput.tables.map((table, index) => (
-              <div key={index} className="overflow-x-auto">
-                <table className="min-w-full border border-gray-300">
-                  <thead className="bg-gray-100">
-                    <tr>
-                      {table.headers.map((header, i) => (
-                        <th
-                          key={i}
-                          className="border border-gray-300 px-4 py-2 text-left font-semibold"
-                        >
-                          {header}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {table.rows.map((row, i) => (
-                      <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                        {row.map((cell, j) => (
-                          <td
-                            key={j}
-                            className="border border-gray-300 px-4 py-2"
-                          >
-                            {cell}
-                          </td>
+            {/* Tables */}
+            {currentOutput.tables && currentOutput.tables.length > 0 && (
+              <div className="space-y-4" style={{ fontSize: '11pt' }}>
+                {currentOutput.tables.map((table, index) => (
+                  <div key={index} className="overflow-x-auto">
+                    <table className="min-w-full border border-gray-300">
+                      <thead className="bg-gray-100">
+                        <tr>
+                          {table.headers.map((header, i) => (
+                            <th
+                              key={i}
+                              className="border border-gray-300 px-4 py-2 text-left font-semibold"
+                            >
+                              {header}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {table.rows.map((row, i) => (
+                          <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                            {row.map((cell, j) => (
+                              <td
+                                key={j}
+                                className="border border-gray-300 px-4 py-2"
+                              >
+                                {cell}
+                              </td>
+                            ))}
+                          </tr>
                         ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                      </tbody>
+                    </table>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
         )}
       </div>
@@ -580,7 +667,7 @@ function App() {
       {/* Main content area */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Panel - Interaction Panel */}
-        <div id="left-panel" className="flex flex-col bg-white">
+        <div id="left-panel" ref={leftPanelRef} tabIndex={0} className="flex flex-col bg-white focus:outline-none">
           {/* Messages area */}
           <div className="flex-1 overflow-y-auto p-4">
             {messages.length === 0 && (
@@ -679,8 +766,34 @@ function App() {
         {/* Right Column */}
         <div id="right-column" className="flex flex-col">
           {/* Right Top Panel - Output Display */}
-          <div id="right-top-panel" className="bg-white border-l border-gray-200 overflow-hidden">
-            <div className="h-full overflow-hidden">
+          <div
+            id="right-top-panel"
+            className="bg-white border-l border-gray-200 overflow-hidden relative"
+            onMouseEnter={() => setIsOutputPanelHovered(true)}
+            onMouseLeave={() => setIsOutputPanelHovered(false)}
+          >
+            {/* Floating Toolbar */}
+            {isOutputPanelHovered && (
+              <div className="absolute top-2.5 right-2.5 flex gap-1 bg-white rounded-md shadow-md p-1 z-10">
+                <button
+                  onClick={handleToggleFavorite}
+                  className="w-6 h-6 flex items-center justify-center hover:bg-gray-100 rounded transition-colors"
+                >
+                  <img
+                    src={selectedCardId && favoritedCardIds.has(selectedCardId) ? "/favorite-on.png" : "/favorite-off.png"}
+                    alt="Favorite"
+                    className="w-4 h-4"
+                  />
+                </button>
+                <button className="w-6 h-6 flex items-center justify-center hover:bg-gray-100 rounded transition-colors">
+                  <img src="/copy-plot.png" alt="Copy plot" className="w-4 h-4" />
+                </button>
+                <button className="w-6 h-6 flex items-center justify-center hover:bg-gray-100 rounded transition-colors">
+                  <img src="/check-code.png" alt="Check code" className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+            <div className="h-full overflow-hidden relative">
               {renderOutput()}
             </div>
           </div>
