@@ -9,7 +9,7 @@ import React from 'react';
  * - Blue border when selected, gray border when unselected
  * - Clicking the card triggers selection
  */
-const CodeCard = ({ id, summary, description, code, isSelected, onClick }) => {
+const CodeCard = React.forwardRef(({ id, summary, description, code, isSelected, onClick }, ref) => {
   // Determine if code is for chart generation
   const isChartCode = code && (
     code.includes('plot(') ||
@@ -23,6 +23,7 @@ const CodeCard = ({ id, summary, description, code, isSelected, onClick }) => {
 
   return (
     <div
+      ref={ref}
       onClick={() => onClick(id)}
       className={`
         p-4 mb-3 cursor-pointer transition-all bg-[#f5f8f9]
@@ -66,6 +67,8 @@ const CodeCard = ({ id, summary, description, code, isSelected, onClick }) => {
       </div>
     </div>
   );
-};
+});
+
+CodeCard.displayName = 'CodeCard';
 
 export default CodeCard;

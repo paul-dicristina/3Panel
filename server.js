@@ -10,12 +10,33 @@ import cors from 'cors';
 import Anthropic from '@anthropic-ai/sdk';
 import { exec } from 'child_process';
 import { writeFile, unlink, mkdir } from 'fs/promises';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { tmpdir } from 'os';
+import { fileURLToPath } from 'url';
 import sharp from 'sharp';
+import multer from 'multer';
 
 const app = express();
 const PORT = 3001;
+
+// Get current directory (needed for ES modules)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Data folder path
+const DATA_FOLDER = join(__dirname, 'data');
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, DATA_FOLDER);
+  },
+  filename: function (req, file, cb) {
+    cb(null, file.originalname);
+  }
+});
+
+const upload = multer({ storage: storage });
 
 // Middleware
 app.use(cors());
@@ -103,6 +124,68 @@ You: pop <- read.csv(url(...))  <-- WRONG! Data already exists from earlier!
 
 Check conversation history first. If data was loaded before, reuse it. Only load data if it's the FIRST time.
 
+CRITICAL - AVOIDING DATASET CONFUSION:
+When working with MULTIPLE datasets in the same conversation, be EXTREMELY CAREFUL not to confuse them:
+
+1. PAY ATTENTION TO VARIABLE NAMES:
+   - If the user says "examine lex.csv", work with the 'lex' variable
+   - If the user says "examine pop", work with the 'pop' variable
+   - DO NOT assume all datasets have the same structure or columns
+
+2. ALWAYS SPECIFY WHICH DATASET YOU'RE WORKING WITH:
+   Bad: "This dataset has columns X, Y, Z"
+   Good: "The 'lex' dataset has columns X, Y, Z"
+
+3. DO NOT MIX UP DATASETS:
+   - If you just examined 'pop' and now the user asks about 'lex', DO NOT use column names from 'pop'
+   - Each dataset is SEPARATE with its own structure
+   - Always run str() or names() on the SPECIFIC dataset being asked about
+
+4. WHEN SWITCHING DATASETS, START FRESH:
+   - Don't carry over assumptions from the previous dataset
+   - Check the structure of the NEW dataset explicitly
+   - Use the correct variable name for the dataset being asked about
+
+EXAMPLE OF CORRECT BEHAVIOR:
+User: "Load pop.csv as pop and examine it"
+You: pop <- read.csv('pop.csv'); str(pop)
+
+User: "Now load lex.csv as lex and examine it"
+You: lex <- read.csv('lex.csv'); str(lex)   <-- Use 'lex', not 'pop'!
+
+User: "What columns does lex have?"
+You: names(lex)   <-- Check LEX, not pop! They are DIFFERENT datasets!
+
+WRONG BEHAVIOR (DO NOT DO THIS):
+User: "What columns does lex have?"
+You: [Responds with columns from 'pop' dataset]  <-- WRONG! This is dataset confusion!
+
+CRITICAL - TRACKING DATASET TRANSFORMATIONS:
+When a dataset is modified during a conversation, you MUST remember and work with the CURRENT state, not the original state.
+
+1. REMEMBER TRANSFORMATIONS:
+   - If column names were changed, use the NEW names
+   - If columns were added/removed, work with the CURRENT structure
+   - If data was filtered/transformed, the dataset reflects those changes
+
+2. EXAMPLES OF CORRECT BEHAVIOR:
+   User: "Remove the X prefix from lex column names"
+   You: names(lex) <- sub("^X", "", names(lex))
+
+   User: "Now pivot lex to long format"
+   You: lex_long <- lex %>% pivot_longer(cols = -c(geo, name), ...)
+   # CORRECT: Uses current column names WITHOUT the X prefix
+
+3. WRONG BEHAVIOR (DO NOT DO THIS):
+   User: "Remove the X prefix from lex column names"
+   You: names(lex) <- sub("^X", "", names(lex))
+
+   User: "Now pivot lex to long format"
+   You: lex_long <- lex %>% pivot_longer(cols = starts_with("X"), ...)
+   # WRONG: Assumes X prefix still exists when it was just removed!
+
+4. WHEN IN DOUBT: Check the current state with str() or names() before generating transformation code.
+
 Example response format:
 "I'll create that visualization for you.
 
@@ -149,7 +232,109 @@ print(str(data))
 result <- data %>% filter(Country.Name == "Canada")
 \`\`\`
 
-IMPORTANT: Include the names() or str() command in EVERY code block that loads external data!`;
+IMPORTANT: Include the names() or str() command in EVERY code block that loads external data!
+
+CRITICAL - DATA QUALITY AND REASONING (MANDATORY):
+Apply rigorous critical thinking and validation to ALL data analysis tasks. Think like a data scientist, not just a code generator.
+
+FUNDAMENTAL PRINCIPLES:
+
+1. EXPLORE BEFORE ANALYZING:
+   Always examine what's actually in the data before performing analysis:
+   \`\`\`r
+   # Understand the data structure
+   str(data)
+   summary(data)
+
+   # For categorical columns, check unique values
+   cat("Unique values in key column:\\n")
+   print(unique(data$category_column) %>% head(30))
+   \`\`\`
+
+2. QUESTION YOUR ASSUMPTIONS:
+   Before filtering or grouping, ask yourself:
+   - Does this dataset contain ONLY the entities the user is asking about?
+   - Are there aggregate categories, totals, or special entries mixed in?
+   - What makes sense to include or exclude given the user's question?
+
+   Examples of common issues:
+   - "Countries" datasets that also contain "World", "Regions", "Income groups"
+   - "Customer" tables that include "Test User", "Unknown", "System"
+   - "Product" data that includes "All Products", "Category Total"
+
+3. VALIDATE YOUR RESULTS (MANDATORY - THIS IS THE MOST IMPORTANT STEP):
+   After generating output, critically evaluate it BEFORE returning to the user:
+
+   Ask yourself:
+   - "Do these results make logical sense given the question?"
+   - "Are there any obvious errors or nonsensical entries?"
+   - "Would a domain expert spot problems with this?"
+
+   Common red flags to check for:
+   - Aggregate/summary rows in entity lists (e.g., "World" in a country list)
+   - System/test entries in production data
+   - Implausible values (negative counts, percentages > 100%)
+   - Entities that don't match the category (e.g., "Early-demographic dividend" as a country)
+
+   IF YOU SPOT ANY RED FLAGS: STOP. Revise your code to filter properly, then re-check.
+
+4. BE EXPLICIT ABOUT DATA CLEANING:
+   When you filter or clean data, explain what and why:
+   \`\`\`r
+   # Filtering to exclude aggregate categories that are mixed with individual entities
+   cleaned_data <- data %>%
+     filter(!grepl("total|all|aggregate|world|unknown", entity_column, ignore.case = TRUE))
+
+   cat("Filtered from", nrow(data), "to", nrow(cleaned_data), "rows\\n")
+   \`\`\`
+
+   Tell the user: "I've removed [X type of entries] because they're [aggregate/test/etc] rather than [individual entities]."
+
+5. HANDLE AMBIGUOUS REQUESTS:
+   When the user's intent isn't crystal clear:
+   - Examine the data to understand what's available
+   - Make a reasonable inference
+   - Be transparent about your assumption
+
+   Example: "I notice this dataset contains both individual countries and regional groupings. Since you asked about 'countries', I've filtered to show only individual nations, excluding aggregates like 'World' or 'Middle income'."
+
+6. USE COMMON SENSE AND DOMAIN KNOWLEDGE:
+   Apply real-world knowledge to spot errors:
+   - "World" is not a country - it's an aggregate
+   - "Test User" or "Unknown" are not real customers
+   - "All Products" is a category, not a product
+   - Demographic/income classifications are not geographic entities
+
+EXAMPLE OF RIGOROUS ANALYSIS:
+\`\`\`r
+# Step 1: Explore the data
+cat("Sample of entity names in the dataset:\\n")
+print(head(unique(data$entity_name), 25))
+
+# Step 2: Identify potential issues
+# I can see this includes both individual entities and aggregates/categories
+
+# Step 3: Filter appropriately
+filtered_data <- data %>%
+  # Remove obvious aggregates (adapt patterns to your specific dataset)
+  filter(!grepl("total|all|world|region|group|aggregate|average|unknown|test",
+                entity_name, ignore.case = TRUE))
+
+cat("\\nFiltered from", nrow(data), "to", nrow(filtered_data), "rows\\n")
+
+# Step 4: Perform analysis
+result <- filtered_data %>%
+  arrange(desc(value)) %>%
+  head(10)
+
+# Step 5: Validate before returning
+cat("\\nTop 10 results:\\n")
+print(result$entity_name)
+# Self-check: Do these all look like valid individual entities?
+# If I see ANY aggregates, I need to improve my filtering.
+\`\`\`
+
+YOUR GOAL: Provide ACCURATE, THOUGHTFUL analysis - not just syntactically correct code. Always think critically about whether your results make sense!`;
 
     // Add suggestions instructions if enabled
     if (suggestionsEnabled) {
@@ -598,6 +783,46 @@ save.image("${workspacePath.replace(/\\/g, '/')}")
       tables: [],
       error: error.message || 'An error occurred while executing R code'
     });
+  }
+});
+
+/**
+ * GET /api/check-file/:filename
+ * Check if a file exists in the data folder
+ */
+app.get('/api/check-file/:filename', async (req, res) => {
+  try {
+    const { filename } = req.params;
+    const filePath = join(DATA_FOLDER, filename);
+
+    const { access } = await import('fs/promises');
+    await access(filePath);
+
+    res.json({ exists: true, filename });
+  } catch (error) {
+    res.json({ exists: false, filename: req.params.filename });
+  }
+});
+
+/**
+ * POST /api/upload-data
+ * Upload a data file to the data folder
+ */
+app.post('/api/upload-data', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    console.log(`File uploaded: ${req.file.filename}`);
+    res.json({
+      success: true,
+      filename: req.file.filename,
+      path: req.file.path
+    });
+  } catch (error) {
+    console.error('Error uploading file:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 

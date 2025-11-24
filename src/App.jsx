@@ -1,9 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Split from 'split.js';
+import { Light as SyntaxHighlighter } from 'react-syntax-highlighter';
+import r from 'react-syntax-highlighter/dist/esm/languages/hljs/r';
+import chrome from 'react-syntax-highlighter/dist/esm/styles/hljs/atom-one-light';
 import ApiKeyModal from './components/ApiKeyModal';
 import CodeCard from './components/CodeCard';
 import { sendMessageToClaude } from './utils/claudeApi';
 import { executeRCode } from './utils/rExecutor';
+
+// Register R language for syntax highlighting
+SyntaxHighlighter.registerLanguage('r', r);
 
 /**
  * Main App Component
@@ -43,6 +49,8 @@ function App() {
   const splitVerticalInstanceRef = useRef(null);
   const textareaRef = useRef(null);
   const leftPanelRef = useRef(null);
+  const cardRefsRef = useRef({});
+  const fileInputRef = useRef(null);
 
   // Load API key from localStorage on mount
   useEffect(() => {
@@ -152,6 +160,16 @@ function App() {
         const newCard = codeCards[newIndex];
         if (newCard) {
           handleCardSelect(newCard.id);
+
+          // Scroll the selected card into view
+          const cardElement = cardRefsRef.current[newCard.id];
+          if (cardElement) {
+            cardElement.scrollIntoView({
+              behavior: 'smooth',
+              block: 'nearest',
+              inline: 'nearest'
+            });
+          }
         }
       }
     };
@@ -173,6 +191,138 @@ function App() {
     setApiKey(key);
     localStorage.setItem('anthropic_api_key', key);
     setShowApiKeyModal(false);
+  };
+
+  // Handle file selection for load data
+  const handleFileSelect = async (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      try {
+        let filename = file.name;
+
+        // Check if file already exists in data folder
+        const checkResponse = await fetch(`http://localhost:3001/api/check-file/${encodeURIComponent(filename)}`);
+        const checkResult = await checkResponse.json();
+
+        if (!checkResult.exists) {
+          // File doesn't exist, upload it
+          const formData = new FormData();
+          formData.append('file', file);
+
+          const uploadResponse = await fetch('http://localhost:3001/api/upload-data', {
+            method: 'POST',
+            body: formData
+          });
+
+          if (!uploadResponse.ok) {
+            throw new Error('File upload failed');
+          }
+
+          const uploadResult = await uploadResponse.json();
+          console.log('File uploaded:', uploadResult.filename);
+        } else {
+          console.log('File already exists in data folder:', filename);
+        }
+
+        // Automatically submit the load data prompt
+        const loadMessage = `Load ${filename} and show the first 25 rows`;
+        setIsLoading(true);
+
+        // Add user message to chat
+        const newUserMessage = {
+          id: Date.now(),
+          role: 'user',
+          content: loadMessage
+        };
+        setMessages(prev => [...prev, newUserMessage]);
+
+        try {
+          // Collect recent plot images from code cards (last 3 plots for context)
+          const recentPlots = [];
+          for (const card of codeCards.slice(-3)) {
+            if (card.output && card.output.plots) {
+              for (const plot of card.output.plots) {
+                if (plot.pngBase64) {
+                  recentPlots.push({
+                    base64Data: plot.pngBase64,
+                    summary: card.summary
+                  });
+                }
+              }
+            }
+          }
+
+          // Send to Claude API with plot images
+          const claudeResponse = await sendMessageToClaude(
+            apiKey,
+            loadMessage,
+            messages.map(m => ({ role: m.role, content: m.content })),
+            suggestionsEnabled,
+            recentPlots
+          );
+
+          // Create code cards for any R code blocks
+          const newCards = claudeResponse.rCodeBlocks.length > 0
+            ? claudeResponse.rCodeBlocks.map((block, index) => ({
+                id: `card-${Date.now()}-${index}`,
+                code: block.code,
+                summary: block.summary,
+                description: block.description,
+                output: null
+              }))
+            : [];
+
+          // Strip R code blocks from the displayed message text
+          const displayText = claudeResponse.text.replace(/```[rR]\s*\n[\s\S]*?```/g, '').trim();
+
+          // Add assistant response to chat
+          const assistantMessage = {
+            id: Date.now() + 1,
+            role: 'assistant',
+            content: claudeResponse.text,
+            displayContent: displayText,
+            codeCards: newCards
+          };
+          setMessages(prev => [...prev, assistantMessage]);
+
+          // Add cards to global cards array
+          if (newCards.length > 0) {
+            setCodeCards(prev => [...prev, ...newCards]);
+
+            // Auto-select the first new card
+            const firstNewCard = newCards[0];
+            setSelectedCardId(firstNewCard.id);
+            setCurrentCode(firstNewCard.code);
+
+            // Execute the R code
+            executeSelectedCode(firstNewCard.code, firstNewCard.id);
+          }
+        } catch (error) {
+          console.error('Error sending message:', error);
+          const errorMessage = {
+            id: Date.now() + 1,
+            role: 'assistant',
+            content: `Error: ${error.message}. Please check your API key and try again.`
+          };
+          setMessages(prev => [...prev, errorMessage]);
+        } finally {
+          setIsLoading(false);
+        }
+      } catch (error) {
+        console.error('Error uploading file:', error);
+        alert('Failed to upload file. Please try again.');
+      }
+
+      // Reset the file input so the same file can be selected again
+      event.target.value = '';
+    }
+  };
+
+  // Handle load data button click
+  const handleLoadData = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
   };
 
   // Handle new conversation - reset all panels
@@ -427,6 +577,7 @@ function App() {
             {message.codeCards.map(card => (
               <CodeCard
                 key={card.id}
+                ref={el => cardRefsRef.current[card.id] = el}
                 id={card.id}
                 summary={card.summary}
                 description={card.description}
@@ -574,9 +725,16 @@ function App() {
   return (
     <div className="h-screen flex flex-col bg-gray-100">
       {/* Header */}
-      <header className="bg-[#edeff0] h-[24px] border-b border-[#d7dadc]">
+      <header className="bg-[#edeff0] h-[24px]">
         <div className="flex items-center justify-between h-full px-3">
           <div className="flex items-center gap-2 h-full relative">
+            <img
+              src="/load-data.png"
+              alt="Load data"
+              className="h-4 cursor-pointer"
+              onClick={handleLoadData}
+            />
+            <img src="/separator.png" alt="" className="h-4" />
             <img
               src="/new-conversation.png"
               alt="New conversation"
@@ -667,7 +825,7 @@ function App() {
       {/* Main content area */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Panel - Interaction Panel */}
-        <div id="left-panel" ref={leftPanelRef} tabIndex={0} className="flex flex-col bg-white focus:outline-none">
+        <div id="left-panel" ref={leftPanelRef} tabIndex={0} className="flex flex-col bg-white focus:outline-none rounded-[10px]">
           {/* Messages area */}
           <div className="flex-1 overflow-y-auto p-4">
             {messages.length === 0 && (
@@ -768,7 +926,7 @@ function App() {
           {/* Right Top Panel - Output Display */}
           <div
             id="right-top-panel"
-            className="bg-white border-l border-gray-200 overflow-hidden relative"
+            className="bg-white border-l border-gray-200 overflow-hidden relative rounded-[10px]"
             onMouseEnter={() => setIsOutputPanelHovered(true)}
             onMouseLeave={() => setIsOutputPanelHovered(false)}
           >
@@ -799,11 +957,31 @@ function App() {
           </div>
 
           {/* Right Bottom Panel - Code Display */}
-          <div id="right-bottom-panel" className="bg-white border-l border-gray-200 overflow-auto p-4">
+          <div id="right-bottom-panel" className="bg-white border-l border-gray-200 overflow-auto p-4 rounded-[10px]">
             {currentCode ? (
-              <pre className="bg-white text-gray-900 p-4 rounded overflow-x-auto border border-gray-300" style={{ fontSize: '10pt' }}>
-                <code>{currentCode}</code>
-              </pre>
+              <SyntaxHighlighter
+                language="r"
+                style={{
+                  ...chrome,
+                  'hljs-comment': { color: '#5a8c4d' },  // Medium green for comments
+                  'hljs-title': { color: '#0066cc' },    // Blue for function names
+                  'hljs-function': { color: '#0066cc' }, // Blue for function calls
+                  'hljs-name': { color: '#0066cc' },     // Blue for function names
+                  'hljs-keyword': { color: '#a626a4' },  // Purple for keywords
+                  'hljs-string': { color: '#1328a5' },   // Custom blue for strings
+                  'hljs-number': { color: '#986801' },   // Orange for numbers
+                }}
+                customStyle={{
+                  fontSize: '10pt',
+                  padding: '16px',
+                  borderRadius: '4px',
+                  border: '1px solid #d1d5db',
+                  margin: 0
+                }}
+                showLineNumbers={true}
+              >
+                {currentCode}
+              </SyntaxHighlighter>
             ) : (
               <div className="flex items-center justify-center h-full text-gray-500">
                 <div className="text-center">
@@ -815,6 +993,15 @@ function App() {
           </div>
         </div>
       </div>
+
+      {/* Hidden file input for load data */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".csv,.txt,.tsv"
+        onChange={handleFileSelect}
+        style={{ display: 'none' }}
+      />
 
       {/* API Key Modal */}
       <ApiKeyModal
