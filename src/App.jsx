@@ -41,7 +41,6 @@ function App() {
   const [suggestionsEnabled, setSuggestionsEnabled] = useState(false);
   const [showConversationsMenu, setShowConversationsMenu] = useState(false);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
-  const [isOutputPanelHovered, setIsOutputPanelHovered] = useState(false);
   const [favoritedCardIds, setFavoritedCardIds] = useState(new Set());
 
   // Refs for resizable panels
@@ -51,6 +50,43 @@ function App() {
   const leftPanelRef = useRef(null);
   const cardRefsRef = useRef({});
   const fileInputRef = useRef(null);
+
+  // Helper function to determine suggestion icon based on content
+  const getSuggestionIcon = (suggestion) => {
+    const lowerSuggestion = suggestion.toLowerCase();
+
+    // Check for pivot_longer transformations
+    if (lowerSuggestion.includes('pivot_longer') || lowerSuggestion.includes('pivot longer')) {
+      return 'pivot-longer';
+    }
+
+    // Check for plot/chart creation
+    if (lowerSuggestion.includes('plot') ||
+        lowerSuggestion.includes('chart') ||
+        lowerSuggestion.includes('graph') ||
+        lowerSuggestion.includes('histogram') ||
+        lowerSuggestion.includes('scatter') ||
+        lowerSuggestion.includes('boxplot') ||
+        lowerSuggestion.includes('barplot') ||
+        lowerSuggestion.includes('visualization') ||
+        lowerSuggestion.includes('visualize')) {
+      return 'chart';
+    }
+
+    // Check for tabular data output
+    if (lowerSuggestion.includes('show') && (lowerSuggestion.includes('rows') || lowerSuggestion.includes('first'))) {
+      return 'table';
+    }
+    if (lowerSuggestion.includes('display') ||
+        lowerSuggestion.includes('view') ||
+        lowerSuggestion.includes('print') ||
+        (lowerSuggestion.includes('format') && lowerSuggestion.includes('gt'))) {
+      return 'table';
+    }
+
+    // Default to sparkle for all other suggestions
+    return 'sparkle';
+  };
 
   // Load API key from localStorage on mount
   useEffect(() => {
@@ -591,19 +627,26 @@ function App() {
 
         {/* Suggestions (if any) */}
         {suggestions.length > 0 && (
-          <div className="mt-3 ml-0" style={{ fontSize: '11pt' }}>
+          <div className="mt-3 ml-0 max-w-2xl" style={{ fontSize: '10pt' }}>
             <p className="font-semibold text-gray-700 mb-2">Suggestions for further analysis:</p>
-            <div className="space-y-1">
-              {suggestions.map((suggestion, index) => (
-                <button
-                  key={index}
-                  onClick={() => handleSuggestionClick(suggestion)}
-                  className="suggestion-button flex items-start gap-2 text-left text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
-                >
-                  <img src="/sparkle.svg" alt="" className="sparkle-icon w-4 h-4 flex-shrink-0 mt-0.5" />
-                  <span>{suggestion}</span>
-                </button>
-              ))}
+            <div className="grid grid-cols-2 gap-3">
+              {suggestions.map((suggestion, index) => {
+                const iconName = getSuggestionIcon(suggestion);
+                return (
+                  <button
+                    key={index}
+                    onClick={() => handleSuggestionClick(suggestion)}
+                    className="suggestion-button flex items-start gap-2 text-left text-blue-600 hover:text-blue-800 hover:underline cursor-pointer p-2"
+                  >
+                    <img
+                      src={`/${iconName}.svg`}
+                      alt={iconName}
+                      className="w-8 h-8 flex-shrink-0"
+                    />
+                    <span>{suggestion}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
@@ -725,7 +768,7 @@ function App() {
   return (
     <div className="h-screen flex flex-col bg-gray-100">
       {/* Header */}
-      <header className="bg-[#edeff0] h-[24px]">
+      <header className="bg-[#edeff0] h-[26px]">
         <div className="flex items-center justify-between h-full px-3">
           <div className="flex items-center gap-2 h-full relative">
             <img
@@ -813,12 +856,32 @@ function App() {
               )}
             </div>
           </div>
-          <button
-            onClick={() => setShowApiKeyModal(true)}
-            className="px-2 py-0.5 bg-[#edeff0] hover:bg-[#d7dadc] text-[#3a7aaf] border border-[#d7dadc] rounded transition-all text-[10px] font-medium"
-          >
-            Update API Key
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Output panel toolbar icons */}
+            <button
+              onClick={handleToggleFavorite}
+              className="w-6 h-6 flex items-center justify-center hover:bg-gray-200 rounded transition-colors"
+              disabled={!selectedCardId}
+            >
+              <img
+                src={selectedCardId && favoritedCardIds.has(selectedCardId) ? "/favorite-on.png" : "/favorite-off.png"}
+                alt="Favorite"
+                className="w-4 h-4"
+              />
+            </button>
+            <button className="w-6 h-6 flex items-center justify-center hover:bg-gray-200 rounded transition-colors" disabled={!selectedCardId}>
+              <img src="/copy-plot.png" alt="Copy plot" className="w-4 h-4" />
+            </button>
+            <button className="w-6 h-6 flex items-center justify-center hover:bg-gray-200 rounded transition-colors" disabled={!selectedCardId}>
+              <img src="/check-code.png" alt="Check code" className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setShowApiKeyModal(true)}
+              className="px-2 py-0.5 bg-[#edeff0] hover:bg-[#d7dadc] text-[#3a7aaf] border border-[#d7dadc] rounded transition-all text-[10px] font-medium ml-2"
+            >
+              Update API Key
+            </button>
+          </div>
         </div>
       </header>
 
@@ -844,29 +907,30 @@ function App() {
                   </p>
 
                   {/* Startup suggestions */}
-                  <div className="mt-4 text-left" style={{ fontSize: '11pt' }}>
-                    <div className="space-y-[5.3px]">
-                      <button
-                        onClick={() => setInputValue('Create a dot plot for mileage vs horsepower using mtcars color the dots on a gradient from red to blue')}
-                        className="suggestion-button flex items-start gap-2 text-left text-blue-600 hover:text-[#3300d7] hover:underline cursor-pointer w-full"
-                      >
-                        <img src="/sparkle.svg" alt="" className="sparkle-icon w-4 h-4 flex-shrink-0 mt-0.5" />
-                        <span>Create a dot plot for mileage vs horsepower using mtcars color the dots on a gradient from red to blue</span>
-                      </button>
-                      <button
-                        onClick={() => setInputValue('Show the first 25 rows of mtcars')}
-                        className="suggestion-button flex items-start gap-2 text-left text-blue-600 hover:text-[#3300d7] hover:underline cursor-pointer w-full"
-                      >
-                        <img src="/sparkle.svg" alt="" className="sparkle-icon w-4 h-4 flex-shrink-0 mt-0.5" />
-                        <span>Show the first 25 rows of mtcars</span>
-                      </button>
-                      <button
-                        onClick={() => setInputValue('Load https://github.com/datasets/population/blob/main/data/population.csv into a dataset named pop and show the first 25 rows')}
-                        className="suggestion-button flex items-start gap-2 text-left text-blue-600 hover:text-[#3300d7] hover:underline cursor-pointer w-full"
-                      >
-                        <img src="/sparkle.svg" alt="" className="sparkle-icon w-4 h-4 flex-shrink-0 mt-0.5" />
-                        <span>Load https://github.com/datasets/population/blob/main/data/population.csv into a dataset named pop and show the first 25 rows</span>
-                      </button>
+                  <div className="mt-4" style={{ fontSize: '10pt' }}>
+                    <div className="grid grid-cols-2 gap-3">
+                      {[
+                        'Create a dot plot for mileage vs horsepower using mtcars color the dots on a gradient from red to blue',
+                        'Show the first 25 rows of mtcars',
+                        'Create a histogram of vehicle weights from mtcars',
+                        'Load Air_Quality.csv and show first 25 rows formatted with gt'
+                      ].map((suggestion, index) => {
+                        const iconName = getSuggestionIcon(suggestion);
+                        return (
+                          <button
+                            key={index}
+                            onClick={() => setInputValue(suggestion)}
+                            className="suggestion-button flex items-start gap-2 text-left text-blue-600 hover:text-blue-800 hover:underline cursor-pointer p-2"
+                          >
+                            <img
+                              src={`/${iconName}.svg`}
+                              alt={iconName}
+                              className="w-8 h-8 flex-shrink-0"
+                            />
+                            <span>{suggestion}</span>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
@@ -927,30 +991,7 @@ function App() {
           <div
             id="right-top-panel"
             className="bg-white border-l border-gray-200 overflow-hidden relative rounded-[10px]"
-            onMouseEnter={() => setIsOutputPanelHovered(true)}
-            onMouseLeave={() => setIsOutputPanelHovered(false)}
           >
-            {/* Floating Toolbar */}
-            {isOutputPanelHovered && (
-              <div className="absolute top-2.5 right-2.5 flex gap-1 bg-white rounded-md shadow-md p-1 z-10">
-                <button
-                  onClick={handleToggleFavorite}
-                  className="w-6 h-6 flex items-center justify-center hover:bg-gray-100 rounded transition-colors"
-                >
-                  <img
-                    src={selectedCardId && favoritedCardIds.has(selectedCardId) ? "/favorite-on.png" : "/favorite-off.png"}
-                    alt="Favorite"
-                    className="w-4 h-4"
-                  />
-                </button>
-                <button className="w-6 h-6 flex items-center justify-center hover:bg-gray-100 rounded transition-colors">
-                  <img src="/copy-plot.png" alt="Copy plot" className="w-4 h-4" />
-                </button>
-                <button className="w-6 h-6 flex items-center justify-center hover:bg-gray-100 rounded transition-colors">
-                  <img src="/check-code.png" alt="Check code" className="w-4 h-4" />
-                </button>
-              </div>
-            )}
             <div className="h-full overflow-hidden relative">
               {renderOutput()}
             </div>

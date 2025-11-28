@@ -66,8 +66,8 @@ code {
     monospace;
 }
 
-/* Sparkle animation with overshoot */
-@keyframes sparkle-grow {
+/* Suggestion icon animation with overshoot */
+@keyframes icon-grow {
   0% {
     transform: scale(1);
   }
@@ -79,7 +79,7 @@ code {
   }
 }
 
-@keyframes sparkle-shrink {
+@keyframes icon-shrink {
   0% {
     transform: scale(1.15);
   }
@@ -91,17 +91,17 @@ code {
   }
 }
 
-.sparkle-icon {
+.suggestion-button img {
   transition: none;
   transform: scale(1);
 }
 
-.suggestion-button:hover .sparkle-icon {
-  animation: sparkle-grow 0.3s ease-out forwards;
+.suggestion-button:hover img {
+  animation: icon-grow 0.3s ease-out forwards;
 }
 
-.suggestion-button:not(:hover) .sparkle-icon {
-  animation: sparkle-shrink 0.3s ease-out forwards;
+.suggestion-button:not(:hover) img {
+  animation: icon-shrink 0.3s ease-out forwards;
 }
 
 /* Plot container styling - make SVG fit panel while maintaining aspect ratio */

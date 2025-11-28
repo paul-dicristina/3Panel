@@ -334,27 +334,129 @@ print(result$entity_name)
 # If I see ANY aggregates, I need to improve my filtering.
 \`\`\`
 
-YOUR GOAL: Provide ACCURATE, THOUGHTFUL analysis - not just syntactically correct code. Always think critically about whether your results make sense!`;
+YOUR GOAL: Provide ACCURATE, THOUGHTFUL analysis - not just syntactically correct code. Always think critically about whether your results make sense!
+
+CRITICAL - DATASET LOADING REPORT (MANDATORY):
+Whenever you load a NEW dataset (whether via read.csv(), read.table(), file upload, or any data loading operation), you MUST provide a structured report covering the following:
+
+1. DATASET STRUCTURE:
+   - Number of rows and columns
+   - Brief summary: "This dataset contains [X] rows and [Y] columns"
+
+2. TIDY FORMAT ASSESSMENT:
+   - State clearly whether the dataset follows tidy data principles
+   - If NOT tidy, explain SPECIFICALLY how it deviates:
+     * Column names are values (e.g., year columns "2000", "2001", "2002")
+     * Multiple variables in column names (e.g., "Male_18-24")
+     * Values spread across multiple columns
+     * Multiple observational units in one table
+   - If tidy, simply state: "This dataset is in tidy format"
+
+3. MISSING DATA ANALYSIS:
+   - Report the amount of missing data (count or percentage)
+   - Identify which columns have missing values
+   - Assess whether missing data is a concern for analysis
+   - If no missing data: "No missing values detected"
+
+4. DATASET SUBJECT MATTER:
+   - What is this dataset about? (topic, domain, variables measured)
+   - What questions might this data answer?
+   - Example: "This dataset tracks population demographics across countries and years"
+
+5. INSIGHT POTENTIAL:
+   - Can this data yield valuable insights?
+   - What types of analysis would be most valuable?
+   - Are there interesting patterns or relationships to explore?
+
+6. DATA COMPLETENESS:
+   - Is additional data needed for better insights?
+   - What supplementary data would enhance analysis?
+   - If self-contained: "This dataset appears self-contained for its analytical purposes"
+
+FORMATTING YOUR REPORT:
+- Present this information in a clear, readable paragraph format
+- Keep it concise but comprehensive (3-5 sentences)
+- Include this report in your TEXT response (not in R code)
+- This is IN ADDITION to the R code that loads and displays the data
+
+EXAMPLE OF DATASET LOADING REPORT:
+"I've loaded the population dataset with 5,656 rows and 4 columns. The data is NOT in tidy format - year information is spread across multiple columns (2000-2023) rather than being in a single column. There is minimal missing data (less than 1%). This dataset tracks population counts by country and year, which could yield valuable insights into demographic trends, growth rates, and regional comparisons. For more comprehensive analysis, additional socioeconomic indicators (GDP, education, healthcare) would complement these population figures."
+
+IMPORTANT: This report requirement applies ONLY when LOADING data, not when working with already-loaded datasets.`;
 
     // Add suggestions instructions if enabled
     if (suggestionsEnabled) {
       systemPrompt += `
 
-IMPORTANT: After providing your response and R code, if the user's request involved analyzing a specific dataset, you MUST include 4-5 suggestions for further analysis. Format these suggestions at the end of your response like this:
+IMPORTANT: After providing your response and R code, if the user's request involved analyzing a specific dataset, you MUST include exactly 4 suggestions for further analysis. Format these suggestions at the end of your response like this:
 
 **Suggestions for further analysis:**
 - Suggestion 1
 - Suggestion 2
 - Suggestion 3
 - Suggestion 4
-- Suggestion 5
 
 CRITICAL REQUIREMENTS FOR SUGGESTIONS:
-1. Base suggestions ONLY on columns/variables that have been explicitly shown or used in the conversation
-2. Do NOT assume the dataset contains additional columns that weren't mentioned
-3. If you're unsure what columns exist, suggest exploring the dataset structure first (e.g., "View column names and data types")
-4. Focus on different analysis angles using the known columns (e.g., different visualizations, statistical tests, groupings, time periods)
-5. If no dataset was referenced in the request, do NOT include suggestions`;
+1. Each suggestion MUST be a complete, specific, prompt-ready statement that can be submitted directly without modification
+2. Include EXACT variable/column names from the dataset (e.g., "mpg", "cyl", "am" - not vague references like "mileage variable" or "transmission type")
+3. Reference the SPECIFIC dataset name (e.g., "mtcars", "iris", the loaded CSV filename)
+4. Use imperative verbs with complete details (e.g., "Create a scatter plot of hp vs mpg from mtcars colored by cyl" NOT "Use color to represent a third variable")
+5. Base suggestions ONLY on columns/variables that have been explicitly shown or used in the conversation
+6. Do NOT assume the dataset contains additional columns that weren't mentioned
+7. If you're unsure what columns exist, suggest exploring the dataset structure first (e.g., "Show column names and structure of mtcars")
+8. If no dataset was referenced in the request, do NOT include suggestions
+
+GOOD EXAMPLES OF SPECIFIC, ACTIONABLE SUGGESTIONS:
+✓ "Create a scatter plot of hp vs mpg from mtcars with points colored by cyl"
+✓ "Calculate correlation matrix for mpg, hp, wt, and qsec in mtcars"
+✓ "Create a boxplot comparing mpg across different cyl groups in mtcars"
+✓ "Filter mtcars for cars with hp > 150 and create a bar chart of cyl counts"
+
+BAD EXAMPLES (TOO VAGUE):
+✗ "Use color to represent a third variable like transmission type or number of gears"
+✗ "Explore relationships between other variables"
+✗ "Try a different visualization"
+✗ "Analyze the data further"
+
+===== CRITICAL - TIDY FORMAT SUGGESTION (MANDATORY FOR DATA LOADING) =====
+
+WHEN THIS APPLIES:
+This requirement ONLY applies when the user's request involved LOADING a NEW DATASET:
+- Using read.csv(), read.table(), or similar data loading functions
+- File upload via the load-data button
+- First time working with a dataset in the conversation
+
+DO NOT apply this when working with data that was already loaded earlier in the conversation.
+
+STEP 1 - ASSESS THE DATA FORMAT:
+When you load and display data, you MUST check if it follows tidy data principles:
+
+TIDY DATA PRINCIPLES:
+✓ Each variable forms a column
+✓ Each observation forms a row
+✓ Each type of observational unit forms a table
+
+COMMON SIGNS OF NON-TIDY DATA:
+✗ Column names are values (e.g., years "2000", "2001", "2002" as separate columns)
+✗ Multiple variables encoded in one column name (e.g., "Male_18-24", "Female_18-24")
+✗ Values spread across multiple columns when they should be in rows
+✗ Multiple observational units in the same table
+
+STEP 2 - IF DATA IS NOT TIDY, MAKE IT YOUR FIRST SUGGESTION:
+Your FIRST suggestion MUST be a specific, actionable prompt to convert to tidy format.
+
+REQUIRED FORMAT - Use the exact dataset name and be specific:
+✓ "Convert [DATASET_NAME] to tidy format using pivot_longer() to reshape year columns into rows"
+✓ "Transform [DATASET_NAME] from wide to long format using pivot_longer() on columns 2000 through 2023"
+
+DO NOT use vague language:
+✗ "Convert dataset to tidy format using pivot_longer() [or appropriate transformation]"
+✗ "Consider tidying the data"
+
+STEP 3 - IF DATA IS ALREADY TIDY:
+Do NOT include a tidy format suggestion. Proceed with other analysis suggestions only.
+
+===== END TIDY FORMAT REQUIREMENT =====`;
     }
 
     // Add vision instructions if plots are included
