@@ -336,53 +336,61 @@ print(result$entity_name)
 
 YOUR GOAL: Provide ACCURATE, THOUGHTFUL analysis - not just syntactically correct code. Always think critically about whether your results make sense!
 
-CRITICAL - DATASET LOADING REPORT (MANDATORY):
-Whenever you load a NEW dataset (whether via read.csv(), read.table(), file upload, or any data loading operation), you MUST provide a structured report covering the following:
+CRITICAL - DATASET LOADING DIAGNOSTICS (MANDATORY):
+Whenever you load a NEW dataset (whether via read.csv(), read.table(), file upload, or any data loading operation), your R code block MUST include comprehensive diagnostic commands:
 
-1. DATASET STRUCTURE:
-   - Number of rows and columns
-   - Brief summary: "This dataset contains [X] rows and [Y] columns"
+REQUIRED R DIAGNOSTIC COMMANDS:
+\`\`\`r
+# Load the data
+data <- read.csv('filename.csv')
 
-2. TIDY FORMAT ASSESSMENT:
-   - State clearly whether the dataset follows tidy data principles
-   - If NOT tidy, explain SPECIFICALLY how it deviates:
-     * Column names are values (e.g., year columns "2000", "2001", "2002")
-     * Multiple variables in column names (e.g., "Male_18-24")
-     * Values spread across multiple columns
-     * Multiple observational units in one table
-   - If tidy, simply state: "This dataset is in tidy format"
+# === MANDATORY DIAGNOSTIC SECTION - NEVER SKIP ===
+cat("\\n=== DATASET DIAGNOSTICS ===\\n")
+cat("Dimensions:", nrow(data), "rows x", ncol(data), "columns\\n")
+cat("\\nColumn names:\\n")
+print(names(data))
+cat("\\nMissing values per column:\\n")
+print(colSums(is.na(data)))
+cat("\\nTotal missing values:", sum(is.na(data)), "out of", nrow(data) * ncol(data), "total cells\\n")
 
-3. MISSING DATA ANALYSIS:
-   - Report the amount of missing data (count or percentage)
-   - Identify which columns have missing values
-   - Assess whether missing data is a concern for analysis
-   - If no missing data: "No missing values detected"
+# Show structure and preview
+cat("\\nData structure:\\n")
+str(data)
+cat("\\nFirst few rows:\\n")
+print(head(data))
 
-4. DATASET SUBJECT MATTER:
-   - What is this dataset about? (topic, domain, variables measured)
-   - What questions might this data answer?
-   - Example: "This dataset tracks population demographics across countries and years"
+# === TIDY FORMAT ASSESSMENT ===
+cat("\\nTidy format check:\\n")
+# Check if column names look like values (years, categories, etc.)
+potential_value_cols <- names(data)[grepl("^[0-9]{4}$|^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)", names(data))]
+if(length(potential_value_cols) > 0) {
+  cat("⚠️  Column names that appear to be values (suggest pivot_longer):", paste(potential_value_cols, collapse=", "), "\\n")
+} else {
+  cat("✓ Column names appear to be proper variable names\\n")
+}
+\`\`\`
 
-5. INSIGHT POTENTIAL:
-   - Can this data yield valuable insights?
-   - What types of analysis would be most valuable?
-   - Are there interesting patterns or relationships to explore?
+CRITICAL RULES:
+✓ ALWAYS include these diagnostic commands when loading new data
+✓ The diagnostics will display complete information in the output panel
+✓ Let the R output speak for itself - it shows the authoritative data structure
 
-6. DATA COMPLETENESS:
-   - Is additional data needed for better insights?
-   - What supplementary data would enhance analysis?
-   - If self-contained: "This dataset appears self-contained for its analytical purposes"
+YOUR TEXT RESPONSE:
+Keep your text response SHORT and SIMPLE. Do NOT report specific numbers, column names, or data details in your text - the R diagnostics will show everything.
 
-FORMATTING YOUR REPORT:
-- Present this information in a clear, readable paragraph format
-- Keep it concise but comprehensive (3-5 sentences)
-- Include this report in your TEXT response (not in R code)
-- This is IN ADDITION to the R code that loads and displays the data
+Example text response:
+"I've loaded the dataset. Please check the output panel above for complete diagnostics including dimensions, column names, missing data analysis, tidy format assessment, and data preview."
 
-EXAMPLE OF DATASET LOADING REPORT:
-"I've loaded the population dataset with 5,656 rows and 4 columns. The data is NOT in tidy format - year information is spread across multiple columns (2000-2023) rather than being in a single column. There is minimal missing data (less than 1%). This dataset tracks population counts by country and year, which could yield valuable insights into demographic trends, growth rates, and regional comparisons. For more comprehensive analysis, additional socioeconomic indicators (GDP, education, healthcare) would complement these population figures."
+Then you may OPTIONALLY add 1-2 sentences about:
+- What general subject area the data appears to cover (based on filename or general observation)
+- What type of analysis might be interesting to explore
 
-IMPORTANT: This report requirement applies ONLY when LOADING data, not when working with already-loaded datasets.`;
+❌ DO NOT report specific row counts, column counts, or column names in your text
+❌ DO NOT report missing data statistics in your text
+❌ DO NOT guess or assume anything about the data structure in your text
+✓ DO rely entirely on the R diagnostic output to show the user all details
+
+IMPORTANT: This diagnostic requirement applies ONLY when LOADING data, not when working with already-loaded datasets.`;
 
     // Add suggestions instructions if enabled
     if (suggestionsEnabled) {
@@ -925,6 +933,208 @@ app.post('/api/upload-data', upload.single('file'), async (req, res) => {
   } catch (error) {
     console.error('Error uploading file:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/load-and-report-data
+ * Two-phase dataset loading with accurate reporting:
+ * Phase 1: Generate and execute R diagnostic code
+ * Phase 2: Have Claude analyze actual R output and write accurate report
+ *
+ * Body:
+ * - filename: Name of the file to load
+ * - apiKey: Anthropic API key
+ * - suggestionsEnabled: Whether suggestions are enabled
+ */
+app.post('/api/load-and-report-data', async (req, res) => {
+  const tempDir = join(tmpdir(), '3panel-r-execution');
+  const dataDir = join(process.cwd(), 'data');
+  const workspacePath = join(tempDir, 'workspace.RData');
+
+  try {
+    const { filename, apiKey, suggestionsEnabled } = req.body;
+
+    if (!filename || !apiKey) {
+      return res.status(400).json({ error: 'Filename and API key are required' });
+    }
+
+    // Ensure temp directory exists
+    await mkdir(tempDir, { recursive: true });
+
+    // Initialize Anthropic client
+    const anthropic = new Anthropic({ apiKey });
+
+    // ==== PHASE 1: Generate R diagnostic code ====
+    const diagnosticPrompt = `The user has just loaded a dataset file named "${filename}".
+
+Generate R code to load this file and perform comprehensive diagnostics.
+
+IMPORTANT: The working directory will already be set to the data folder, so load the file using ONLY the filename "${filename}" (not "data/${filename}").
+
+Your R code MUST include:
+1. Load the data using read.csv("${filename}") - use EXACTLY this filename, no path prefix
+2. Display dimensions with nrow() and ncol()
+3. Show all column names with names()
+4. Show missing values per column with colSums(is.na())
+5. Show structure with str()
+6. Show first few rows with head()
+7. Check for tidy format issues (e.g., column names that look like values)
+
+Generate ONLY the R code block, no other text.`;
+
+    const phase1Response = await anthropic.messages.create({
+      model: 'claude-3-opus-20240229',
+      max_tokens: 2048,
+      messages: [{ role: 'user', content: diagnosticPrompt }]
+    });
+
+    // Extract R code from response
+    const phase1Text = phase1Response.content[0].text;
+    console.log('Phase 1 response:', phase1Text.substring(0, 200));
+
+    // Try multiple regex patterns to extract R code
+    let codeMatch = phase1Text.match(/```r\n([\s\S]*?)\n```/) ||
+                    phase1Text.match(/```R\n([\s\S]*?)\n```/) ||
+                    phase1Text.match(/```\n([\s\S]*?)\n```/);
+
+    if (!codeMatch) {
+      console.error('Failed to extract R code. Full response:', phase1Text);
+      return res.status(500).json({
+        error: 'Failed to generate diagnostic code',
+        details: 'Could not find R code block in response'
+      });
+    }
+
+    const diagnosticCode = codeMatch[1];
+
+    // ==== Execute the diagnostic R code ====
+    const timestamp = Date.now();
+    const scriptPath = join(tempDir, `diagnostic_${timestamp}.R`);
+
+    // Prepare R script with workspace loading and data directory
+    const fullScript = `
+# Set working directory to data folder
+setwd("${dataDir.replace(/\\/g, '/')}")
+
+# Load workspace if it exists
+workspace_path <- "${workspacePath.replace(/\\/g, '/')}"
+if (file.exists(workspace_path)) {
+  load(workspace_path)
+}
+
+# Execute diagnostic code
+${diagnosticCode}
+
+# Save workspace
+save.image(workspace_path)
+`;
+
+    await writeFile(scriptPath, fullScript);
+
+    // Execute R script
+    const rOutput = await new Promise((resolve, reject) => {
+      exec(`Rscript "${scriptPath}"`, {
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: 30000
+      }, (error, stdout, stderr) => {
+        if (error && !stdout) {
+          reject(new Error(stderr || error.message));
+        } else {
+          resolve({ stdout, stderr });
+        }
+      });
+    });
+
+    // Clean up script file
+    await unlink(scriptPath).catch(() => {});
+
+    // ==== PHASE 2: Have Claude analyze the actual output and write report ====
+    let reportSystemPrompt = `You are a data analysis assistant. You have just executed R code to load and examine a dataset.
+
+The user loaded a file called "${filename}". The R diagnostic code has been executed and you can see the ACTUAL output below.
+
+Based on the ACTUAL R output, write a comprehensive report covering:
+
+1. **Dataset structure:** (exact row and column counts from the output)
+2. **Tidy format assessment:** Whether the dataset is in tidy format:
+   - Tidy: Each variable is a column, each observation is a row
+   - Not tidy: Column names are values (years, months), or multiple variables in column names
+3. **Missing data:** (exact counts and which columns, from the output)
+4. **Subject matter:** What the dataset is about (based on column names and preview)
+5. **Insights and completeness:** Insight potential and whether additional data might be useful
+
+FORMAT YOUR REPORT:
+- Use **bold markdown** for section headers (e.g., "**Dataset structure:**", "**Missing data:**")
+- Write 3-5 sentences in paragraph format
+- Be concise and specific
+
+CRITICAL: Base your report ENTIRELY on the R output shown below. Do NOT make up numbers or column names.`;
+
+    if (suggestionsEnabled) {
+      reportSystemPrompt += `
+
+After your report, provide 2-4 specific suggestions for analysis. Format these as a JSON array with key "suggestions":
+
+{"suggestions": ["suggestion 1", "suggestion 2", "suggestion 3", "suggestion 4"]}
+
+If the data is NOT in tidy format, your FIRST suggestion must be a specific prompt to convert it to tidy format using pivot_longer() or appropriate transformation, mentioning the specific column names that need to be reshaped.`;
+    }
+
+    const reportPrompt = `Here is the R output from loading and examining the dataset:
+
+\`\`\`
+${rOutput.stdout}
+\`\`\`
+
+${rOutput.stderr ? `\nWarnings/Messages:\n${rOutput.stderr}\n` : ''}
+
+Write your comprehensive report based on this actual output.${suggestionsEnabled ? ' Then provide your suggestions in JSON format.' : ''}`;
+
+    const phase2Response = await anthropic.messages.create({
+      model: 'claude-3-opus-20240229',
+      max_tokens: 2048,
+      system: reportSystemPrompt,
+      messages: [{ role: 'user', content: reportPrompt }]
+    });
+
+    const reportText = phase2Response.content[0].text;
+
+    // Extract suggestions if enabled
+    let suggestions = [];
+    let finalReportText = reportText;
+
+    if (suggestionsEnabled) {
+      const suggestionsMatch = reportText.match(/\{[\s\S]*"suggestions"[\s\S]*\}/);
+      if (suggestionsMatch) {
+        try {
+          const suggestionsObj = JSON.parse(suggestionsMatch[0]);
+          suggestions = suggestionsObj.suggestions || [];
+          // Remove JSON from report text
+          finalReportText = reportText.replace(suggestionsMatch[0], '').trim();
+        } catch (e) {
+          console.error('Failed to parse suggestions:', e);
+        }
+      }
+    }
+
+    // Return complete response
+    res.json({
+      success: true,
+      report: finalReportText,
+      code: diagnosticCode,
+      output: rOutput.stdout,
+      error: rOutput.stderr || null,
+      suggestions: suggestions
+    });
+
+  } catch (error) {
+    console.error('Error in load-and-report-data:', error);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({
+      error: error.message || 'Failed to load and report on data',
+      details: error.stack
+    });
   }
 });
 

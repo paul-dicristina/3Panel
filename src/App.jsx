@@ -3,6 +3,7 @@ import Split from 'split.js';
 import { Light as SyntaxHighlighter } from 'react-syntax-highlighter';
 import r from 'react-syntax-highlighter/dist/esm/languages/hljs/r';
 import chrome from 'react-syntax-highlighter/dist/esm/styles/hljs/atom-one-light';
+import ReactMarkdown from 'react-markdown';
 import ApiKeyModal from './components/ApiKeyModal';
 import CodeCard from './components/CodeCard';
 import { sendMessageToClaude } from './utils/claudeApi';
@@ -260,8 +261,8 @@ function App() {
           console.log('File already exists in data folder:', filename);
         }
 
-        // Automatically submit the load data prompt
-        const loadMessage = `Load ${filename} and show the first 25 rows`;
+        // Use the new two-phase load-and-report endpoint for accurate reporting
+        const loadMessage = `Loaded ${filename}`;
         setIsLoading(true);
 
         // Add user message to chat
@@ -273,68 +274,64 @@ function App() {
         setMessages(prev => [...prev, newUserMessage]);
 
         try {
-          // Collect recent plot images from code cards (last 3 plots for context)
-          const recentPlots = [];
-          for (const card of codeCards.slice(-3)) {
-            if (card.output && card.output.plots) {
-              for (const plot of card.output.plots) {
-                if (plot.pngBase64) {
-                  recentPlots.push({
-                    base64Data: plot.pngBase64,
-                    summary: card.summary
-                  });
-                }
-              }
-            }
+          // Call the new two-phase load-and-report endpoint
+          const response = await fetch('http://localhost:3001/api/load-and-report-data', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              filename: filename,
+              apiKey: apiKey,
+              suggestionsEnabled: suggestionsEnabled
+            })
+          });
+
+          if (!response.ok) {
+            throw new Error('Failed to load and analyze data');
           }
 
-          // Send to Claude API with plot images
-          const claudeResponse = await sendMessageToClaude(
-            apiKey,
-            loadMessage,
-            messages.map(m => ({ role: m.role, content: m.content })),
-            suggestionsEnabled,
-            recentPlots
-          );
+          const result = await response.json();
 
-          // Create code cards for any R code blocks
-          const newCards = claudeResponse.rCodeBlocks.length > 0
-            ? claudeResponse.rCodeBlocks.map((block, index) => ({
-                id: `card-${Date.now()}-${index}`,
-                code: block.code,
-                summary: block.summary,
-                description: block.description,
-                output: null
-              }))
-            : [];
+          // Create a code card for the diagnostic code
+          const diagnosticCard = {
+            id: `card-${Date.now()}`,
+            code: result.code,
+            summary: `Dataset Diagnostics: ${filename}`,
+            description: 'Comprehensive dataset analysis including structure, missing data, and tidy format assessment',
+            output: {
+              text: result.output,
+              error: result.error
+            }
+          };
 
-          // Strip R code blocks from the displayed message text
-          const displayText = claudeResponse.text.replace(/```[rR]\s*\n[\s\S]*?```/g, '').trim();
-
-          // Add assistant response to chat
+          // Add assistant response with the accurate report
           const assistantMessage = {
             id: Date.now() + 1,
             role: 'assistant',
-            content: claudeResponse.text,
-            displayContent: displayText,
-            codeCards: newCards
+            content: result.report,
+            displayContent: result.report,
+            codeCards: [diagnosticCard],
+            suggestions: result.suggestions || []
           };
           setMessages(prev => [...prev, assistantMessage]);
 
-          // Add cards to global cards array
-          if (newCards.length > 0) {
-            setCodeCards(prev => [...prev, ...newCards]);
+          // Add the diagnostic card to global cards array
+          setCodeCards(prev => [...prev, diagnosticCard]);
 
-            // Auto-select the first new card
-            const firstNewCard = newCards[0];
-            setSelectedCardId(firstNewCard.id);
-            setCurrentCode(firstNewCard.code);
+          // Auto-select the diagnostic card
+          setSelectedCardId(diagnosticCard.id);
+          setCurrentCode(diagnosticCard.code);
 
-            // Execute the R code
-            executeSelectedCode(firstNewCard.code, firstNewCard.id);
-          }
+          // Set the output (already executed on backend)
+          setCurrentOutput({
+            text: result.output,
+            error: result.error,
+            plots: []
+          });
+
         } catch (error) {
-          console.error('Error sending message:', error);
+          console.error('Error loading and reporting data:', error);
           const errorMessage = {
             id: Date.now() + 1,
             role: 'assistant',
@@ -587,8 +584,12 @@ function App() {
       ? message.displayContent
       : message.content;
 
+    // Check if suggestions are provided directly in message object (from new load-and-report endpoint)
+    // Otherwise parse them from the content
     const { mainContent, suggestions } = message.role === 'assistant'
-      ? parseSuggestions(contentToDisplay)
+      ? (message.suggestions
+          ? { mainContent: contentToDisplay, suggestions: message.suggestions }
+          : parseSuggestions(contentToDisplay))
       : { mainContent: contentToDisplay, suggestions: [] };
 
     return (
@@ -603,7 +604,9 @@ function App() {
             }`}
             style={{ fontSize: '11pt' }}
           >
-            <div className="whitespace-pre-wrap break-words">{mainContent}</div>
+            <div className="whitespace-pre-wrap break-words">
+              <ReactMarkdown>{mainContent}</ReactMarkdown>
+            </div>
           </div>
         </div>
 
