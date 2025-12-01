@@ -108,6 +108,25 @@ KEY RULES:
 4. Libraries (ggplot2, dplyr, etc.) DO NOT persist - always call library() when needed
 5. When analyzing data that was loaded earlier, just use the variable name directly
 
+CRITICAL - DATASET VARIABLE NAMING CONVENTION:
+When datasets are loaded via the load-data button, they follow a strict naming convention:
+- Variable name = filename without the .csv extension
+- Example: "lex.csv" → variable is "lex"
+- Example: "population_data.csv" → variable is "population_data"
+- Example: "my_dataset.csv" → variable is "my_dataset"
+
+When the user asks you to work with a dataset:
+1. LOOK BACK in the conversation history for when the dataset was loaded
+2. FIND the filename (e.g., "lex.csv")
+3. REMOVE the .csv extension to get the variable name (e.g., "lex")
+4. USE that variable name in your code
+
+Example:
+User loads: "lex.csv"
+Variable is: lex
+User asks: "Pivot lex to long format"
+You generate: "lex_long <- lex %>% pivot_longer(...)"  <-- Use lex, not lex_data!
+
 CORRECT workflow example:
 User: "Load population data from URL into variable pop"
 You: Generate code that loads: pop <- read.csv(url(...))
@@ -966,20 +985,25 @@ app.post('/api/load-and-report-data', async (req, res) => {
     const anthropic = new Anthropic({ apiKey });
 
     // ==== PHASE 1: Generate R diagnostic code ====
+    const baseFilename = filename.replace(/\.csv$/i, ''); // Remove .csv extension
     const diagnosticPrompt = `The user has just loaded a dataset file named "${filename}".
 
 Generate R code to load this file and perform comprehensive diagnostics.
 
-IMPORTANT: The working directory will already be set to the data folder, so load the file using ONLY the filename "${filename}" (not "data/${filename}").
+CRITICAL VARIABLE NAMING RULE:
+The variable name MUST be: ${baseFilename}
+(This is the filename without the .csv extension)
 
-Your R code MUST include:
-1. Load the data using read.csv("${filename}") - use EXACTLY this filename, no path prefix
-2. Display dimensions with nrow() and ncol()
-3. Show all column names with names()
-4. Show missing values per column with colSums(is.na())
-5. Show structure with str()
-6. Show first few rows with head()
-7. Check for tidy format issues (e.g., column names that look like values)
+Start your code with:
+${baseFilename} <- read.csv("${filename}")
+
+Then run diagnostics on the ${baseFilename} dataset:
+- Show dimensions (nrow/ncol)
+- Show column names
+- Show missing values per column
+- Show structure
+- Show first few rows
+- Check for tidy format issues
 
 Generate ONLY the R code block, no other text.`;
 

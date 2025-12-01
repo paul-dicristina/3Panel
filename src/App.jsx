@@ -43,6 +43,7 @@ function App() {
   const [showConversationsMenu, setShowConversationsMenu] = useState(false);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [favoritedCardIds, setFavoritedCardIds] = useState(new Set());
+  const [isSubmitAnimating, setIsSubmitAnimating] = useState(false);
 
   // Refs for resizable panels
   const splitInstanceRef = useRef(null);
@@ -404,6 +405,9 @@ function App() {
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
 
+    // Trigger submit button animation (will reset when response received)
+    setIsSubmitAnimating(true);
+
     const userMessage = inputValue.trim();
     setInputValue('');
     setIsLoading(true);
@@ -493,6 +497,7 @@ function App() {
       setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
+      setIsSubmitAnimating(false);
     }
   };
 
@@ -967,10 +972,10 @@ function App() {
               <button
                 onClick={handleSendMessage}
                 disabled={isLoading || !inputValue.trim()}
-                className="absolute right-1 top-1 w-8 h-8 rounded-md text-white bg-[#3a7aaf] hover:bg-[#2d6290] disabled:bg-[#c0c0c0] disabled:cursor-not-allowed transition-colors flex items-center justify-center"
+                className={`absolute right-1 top-1 w-8 h-8 rounded-md text-white bg-[#3a7aaf] hover:bg-[#2d6290] disabled:bg-[#c0c0c0] disabled:cursor-not-allowed transition-colors flex items-center justify-center overflow-hidden ${isSubmitAnimating ? 'submit-button-animating' : ''}`}
               >
                 <svg
-                  className="w-4 h-4"
+                  className="arrow-icon w-4 h-4"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -983,6 +988,7 @@ function App() {
                     d="M5 10l7-7m0 0l7 7m-7-7v18"
                   />
                 </svg>
+                <div className="square-icon absolute w-4 h-4 bg-white rounded-sm opacity-0" />
               </button>
             </div>
           </div>
