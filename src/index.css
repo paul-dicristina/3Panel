@@ -161,9 +161,9 @@ code {
 }
 
 .submit-button-animating .arrow-icon {
-  animation: arrow-submit 600ms ease-out forwards;
+  animation: arrow-submit 800ms ease-out forwards;
 }
 
 .submit-button-animating .square-icon {
-  animation: square-appear 600ms ease-out forwards;
+  animation: square-appear 800ms ease-out forwards;
 }

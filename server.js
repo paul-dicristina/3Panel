@@ -540,6 +540,42 @@ When the user asks you to modify or improve a plot, you can see exactly what it 
       });
     }
 
+    // Debug: Log messages before filtering
+    console.log('\n=== BEFORE FILTERING ===');
+    formattedMessages.forEach((msg, idx) => {
+      console.log(`Message ${idx}:`, {
+        role: msg.role,
+        contentType: typeof msg.content,
+        contentValue: Array.isArray(msg.content) ? `[Array of ${msg.content.length}]` : msg.content,
+        isEmpty: !msg.content || (typeof msg.content === 'string' && msg.content.trim().length === 0)
+      });
+    });
+
+    // Filter out messages with empty content (e.g., dataset report messages)
+    formattedMessages = formattedMessages.filter(msg => {
+      // For string content, check if it's non-empty
+      if (typeof msg.content === 'string') {
+        return msg.content.trim().length > 0;
+      }
+      // For array content (content blocks), check if array has items
+      if (Array.isArray(msg.content)) {
+        return msg.content.length > 0;
+      }
+      // Reject falsy content
+      return false;
+    });
+
+    // Debug: Log messages after filtering
+    console.log('\n=== AFTER FILTERING ===');
+    formattedMessages.forEach((msg, idx) => {
+      console.log(`Message ${idx}:`, {
+        role: msg.role,
+        contentType: typeof msg.content,
+        contentValue: Array.isArray(msg.content) ? `[Array of ${msg.content.length}]` : msg.content
+      });
+    });
+    console.log(`Total messages: ${formattedMessages.length}\n`);
+
     // Call Claude API
     // Using Claude 3 Opus - the most powerful model for best code generation
     const message = await anthropic.messages.create({
@@ -984,53 +1020,58 @@ app.post('/api/load-and-report-data', async (req, res) => {
     // Initialize Anthropic client
     const anthropic = new Anthropic({ apiKey });
 
-    // ==== PHASE 1: Generate R diagnostic code ====
+    // ==== PHASE 1: Use explicit diagnostic R code ====
     const baseFilename = filename.replace(/\.csv$/i, ''); // Remove .csv extension
-    const diagnosticPrompt = `The user has just loaded a dataset file named "${filename}".
 
-Generate R code to load this file and perform comprehensive diagnostics.
+    // Generate explicit diagnostic code instead of asking Claude
+    const diagnosticCode = `# Suppress package startup messages
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+})
 
-CRITICAL VARIABLE NAMING RULE:
-The variable name MUST be: ${baseFilename}
-(This is the filename without the .csv extension)
-
-Start your code with:
 ${baseFilename} <- read.csv("${filename}")
 
-Then run diagnostics on the ${baseFilename} dataset:
-- Show dimensions (nrow/ncol)
-- Show column names
-- Show missing values per column
-- Show structure
-- Show first few rows
-- Check for tidy format issues
+# Dimensions
+cat("Dimensions:\\n")
+cat(paste("Rows:", nrow(${baseFilename}), "\\n"))
+cat(paste("Columns:", ncol(${baseFilename}), "\\n\\n"))
 
-Generate ONLY the R code block, no other text.`;
+# Column names
+cat("Column names:\\n")
+print(names(${baseFilename}))
+cat("\\n")
 
-    const phase1Response = await anthropic.messages.create({
-      model: 'claude-3-opus-20240229',
-      max_tokens: 2048,
-      messages: [{ role: 'user', content: diagnosticPrompt }]
-    });
+# Missing values per column
+cat("Missing values per column:\\n")
+print(colSums(is.na(${baseFilename})))
+cat("\\nTotal missing values:", sum(is.na(${baseFilename})), "out of", nrow(${baseFilename}) * ncol(${baseFilename}), "total cells\\n\\n")
 
-    // Extract R code from response
-    const phase1Text = phase1Response.content[0].text;
-    console.log('Phase 1 response:', phase1Text.substring(0, 200));
+# Structure
+cat("Data structure:\\n")
+str(${baseFilename})
+cat("\\n")
 
-    // Try multiple regex patterns to extract R code
-    let codeMatch = phase1Text.match(/```r\n([\s\S]*?)\n```/) ||
-                    phase1Text.match(/```R\n([\s\S]*?)\n```/) ||
-                    phase1Text.match(/```\n([\s\S]*?)\n```/);
+# First few rows
+cat("First few rows:\\n")
+print(head(${baseFilename}))
+cat("\\n")
 
-    if (!codeMatch) {
-      console.error('Failed to extract R code. Full response:', phase1Text);
-      return res.status(500).json({
-        error: 'Failed to generate diagnostic code',
-        details: 'Could not find R code block in response'
-      });
-    }
+# Check for tidy format issues
+cat("Checking for tidy format issues...\\n")
+col_names <- names(${baseFilename})
+year_cols <- grep("^X?[0-9]{4}$", col_names, value = TRUE)
+month_cols <- grep("^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)", col_names, value = TRUE, ignore.case = TRUE)
 
-    const diagnosticCode = codeMatch[1];
+if (length(year_cols) > 0) {
+  cat("⚠️  Column names that appear to be years:", paste(year_cols, collapse = ", "), "\\n")
+  cat("   Suggest using pivot_longer() to reshape these columns into rows\\n")
+} else if (length(month_cols) > 0) {
+  cat("⚠️  Column names that appear to be months:", paste(month_cols, collapse = ", "), "\\n")
+  cat("   Suggest using pivot_longer() to reshape these columns into rows\\n")
+} else {
+  cat("✓ Column names appear to be proper variable names\\n")
+}`;
 
     // ==== Execute the diagnostic R code ====
     const timestamp = Date.now();
@@ -1073,36 +1114,41 @@ save.image(workspace_path)
     // Clean up script file
     await unlink(scriptPath).catch(() => {});
 
+    // Validate that we got output
+    if (!rOutput.stdout || rOutput.stdout.trim().length === 0) {
+      console.error('R execution produced no output');
+      return res.status(500).json({
+        error: 'R execution produced no output',
+        details: rOutput.stderr || 'Unknown error'
+      });
+    }
+
     // ==== PHASE 2: Have Claude analyze the actual output and write report ====
     let reportSystemPrompt = `You are a data analysis assistant. You have just executed R code to load and examine a dataset.
 
 The user loaded a file called "${filename}". The R diagnostic code has been executed and you can see the ACTUAL output below.
 
-Based on the ACTUAL R output, write a comprehensive report covering:
+Based on the ACTUAL R output, write a comprehensive report in JSON format with these sections:
 
-1. **Dataset structure:** (exact row and column counts from the output)
-2. **Tidy format assessment:** Whether the dataset is in tidy format:
-   - Tidy: Each variable is a column, each observation is a row
-   - Not tidy: Column names are values (years, months), or multiple variables in column names
-3. **Missing data:** (exact counts and which columns, from the output)
-4. **Subject matter:** What the dataset is about (based on column names and preview)
-5. **Insights and completeness:** Insight potential and whether additional data might be useful
+{
+  "structure": "Text describing exact dimensions and time range if applicable",
+  "tidyFormat": "Text describing whether dataset is tidy and what needs to be reshaped",
+  "missingData": "Text describing missing data patterns and counts",
+  "subject": "Text describing what the dataset is about",
+  "insights": "Text describing analysis potential and data completeness"
+}
 
-FORMAT YOUR REPORT:
-- Use **bold markdown** for section headers (e.g., "**Dataset structure:**", "**Missing data:**")
+For each section:
 - Write 3-5 sentences in paragraph format
 - Be concise and specific
+- Base your report ENTIRELY on the R output shown below
 
-CRITICAL: Base your report ENTIRELY on the R output shown below. Do NOT make up numbers or column names.`;
+CRITICAL: Return ONLY valid JSON. Do NOT include any text before or after the JSON object.`;
 
     if (suggestionsEnabled) {
       reportSystemPrompt += `
 
-After your report, provide 2-4 specific suggestions for analysis. Format these as a JSON array with key "suggestions":
-
-{"suggestions": ["suggestion 1", "suggestion 2", "suggestion 3", "suggestion 4"]}
-
-If the data is NOT in tidy format, your FIRST suggestion must be a specific prompt to convert it to tidy format using pivot_longer() or appropriate transformation, mentioning the specific column names that need to be reshaped.`;
+Add a "suggestions" field with 2-4 specific analysis suggestions. If the data is NOT in tidy format, the FIRST suggestion must be a specific prompt to convert it using pivot_longer() or appropriate transformation.`;
     }
 
     const reportPrompt = `Here is the R output from loading and examining the dataset:
@@ -1113,7 +1159,7 @@ ${rOutput.stdout}
 
 ${rOutput.stderr ? `\nWarnings/Messages:\n${rOutput.stderr}\n` : ''}
 
-Write your comprehensive report based on this actual output.${suggestionsEnabled ? ' Then provide your suggestions in JSON format.' : ''}`;
+Write your comprehensive report in JSON format based on this actual output.`;
 
     const phase2Response = await anthropic.messages.create({
       model: 'claude-3-opus-20240229',
@@ -1124,32 +1170,54 @@ Write your comprehensive report based on this actual output.${suggestionsEnabled
 
     const reportText = phase2Response.content[0].text;
 
-    // Extract suggestions if enabled
+    // Parse JSON report
+    let reportSections = {};
     let suggestions = [];
-    let finalReportText = reportText;
 
-    if (suggestionsEnabled) {
-      const suggestionsMatch = reportText.match(/\{[\s\S]*"suggestions"[\s\S]*\}/);
-      if (suggestionsMatch) {
-        try {
-          const suggestionsObj = JSON.parse(suggestionsMatch[0]);
-          suggestions = suggestionsObj.suggestions || [];
-          // Remove JSON from report text
-          finalReportText = reportText.replace(suggestionsMatch[0], '').trim();
-        } catch (e) {
-          console.error('Failed to parse suggestions:', e);
+    try {
+      let jsonText = reportText;
+
+      // Try to extract JSON from markdown code block first
+      const codeBlockMatch = reportText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+      if (codeBlockMatch) {
+        jsonText = codeBlockMatch[1];
+      } else {
+        // Try to find JSON object, using non-greedy match
+        const jsonMatch = reportText.match(/\{[\s\S]*?\n\}/);
+        if (jsonMatch) {
+          jsonText = jsonMatch[0];
         }
       }
+
+      console.log('Attempting to parse JSON:', jsonText.substring(0, 200) + '...');
+      const reportData = JSON.parse(jsonText);
+
+      reportSections = {
+        structure: reportData.structure || '',
+        tidyFormat: reportData.tidyFormat || '',
+        missingData: reportData.missingData || '',
+        subject: reportData.subject || '',
+        insights: reportData.insights || ''
+      };
+      suggestions = reportData.suggestions || [];
+
+      console.log('Successfully parsed report sections');
+    } catch (e) {
+      console.error('Failed to parse report JSON:', e);
+      console.error('Raw response text:', reportText);
+      // Fallback to original text format
+      reportSections = { structure: reportText };
     }
 
     // Return complete response
     res.json({
       success: true,
-      report: finalReportText,
+      reportSections: reportSections,
       code: diagnosticCode,
       output: rOutput.stdout,
       error: rOutput.stderr || null,
-      suggestions: suggestions
+      suggestions: suggestions,
+      filename: filename
     });
 
   } catch (error) {

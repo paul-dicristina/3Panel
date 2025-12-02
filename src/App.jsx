@@ -6,6 +6,7 @@ import chrome from 'react-syntax-highlighter/dist/esm/styles/hljs/atom-one-light
 import ReactMarkdown from 'react-markdown';
 import ApiKeyModal from './components/ApiKeyModal';
 import CodeCard from './components/CodeCard';
+import DatasetReport from './components/DatasetReport';
 import { sendMessageToClaude } from './utils/claudeApi';
 import { executeRCode } from './utils/rExecutor';
 
@@ -50,6 +51,7 @@ function App() {
   const splitVerticalInstanceRef = useRef(null);
   const textareaRef = useRef(null);
   const leftPanelRef = useRef(null);
+  const messagesContainerRef = useRef(null);
   const cardRefsRef = useRef({});
   const fileInputRef = useRef(null);
 
@@ -108,6 +110,13 @@ function App() {
       textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
     }
   }, [inputValue]);
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+    }
+  }, [messages]);
 
   // Close conversations menu when clicking outside
   useEffect(() => {
@@ -294,6 +303,11 @@ function App() {
 
           const result = await response.json();
 
+          // Debug: Log the result to see what we got back
+          console.log('Load-and-report result:', result);
+          console.log('reportSections:', result.reportSections);
+          console.log('filename:', result.filename);
+
           // Create a code card for the diagnostic code
           const diagnosticCard = {
             id: `card-${Date.now()}`,
@@ -306,15 +320,18 @@ function App() {
             }
           };
 
-          // Add assistant response with the accurate report
+          // Add assistant response with the tabbed report
           const assistantMessage = {
             id: Date.now() + 1,
             role: 'assistant',
-            content: result.report,
-            displayContent: result.report,
+            content: '',  // Empty content since we'll use DatasetReport component
+            displayContent: '',
             codeCards: [diagnosticCard],
-            suggestions: result.suggestions || []
+            suggestions: result.suggestions || [],
+            reportSections: result.reportSections,
+            filename: result.filename
           };
+          console.log('Assistant message created:', assistantMessage);
           setMessages(prev => [...prev, assistantMessage]);
 
           // Add the diagnostic card to global cards array
@@ -584,6 +601,9 @@ function App() {
 
   // Render chat messages
   const renderMessage = (message) => {
+    // Debug: Log message being rendered
+    console.log('Rendering message:', message.id, 'reportSections:', message.reportSections, 'filename:', message.filename);
+
     // Use displayContent for assistant messages if available, otherwise use content
     const contentToDisplay = message.role === 'assistant' && message.displayContent
       ? message.displayContent
@@ -599,21 +619,33 @@ function App() {
 
     return (
       <div key={message.id} className="mb-4">
-        {/* Message bubble */}
-        <div className={`${message.role === 'user' ? 'text-right' : 'text-left'}`}>
-          <div
-            className={`inline-block max-w-[80%] p-3 rounded-lg ${
-              message.role === 'user'
-                ? 'bg-[#add7fd] text-gray-800'
-                : 'bg-white text-gray-800'
-            }`}
-            style={{ fontSize: '11pt' }}
-          >
-            <div className="whitespace-pre-wrap break-words">
-              <ReactMarkdown>{mainContent}</ReactMarkdown>
+        {/* Message bubble - only show if there's content */}
+        {mainContent && (
+          <div className={`${message.role === 'user' ? 'text-right' : 'text-left'}`}>
+            <div
+              className={`inline-block max-w-[80%] p-3 rounded-lg ${
+                message.role === 'user'
+                  ? 'bg-[#add7fd] text-gray-800'
+                  : 'bg-white text-gray-800'
+              }`}
+              style={{ fontSize: '11pt' }}
+            >
+              <div className="whitespace-pre-wrap break-words">
+                <ReactMarkdown>{mainContent}</ReactMarkdown>
+              </div>
             </div>
           </div>
-        </div>
+        )}
+
+        {/* Dataset report with tabs (if available) */}
+        {message.reportSections && message.filename && (
+          <div className="mt-3 max-w-[80%]">
+            <DatasetReport
+              filename={message.filename}
+              reportSections={message.reportSections}
+            />
+          </div>
+        )}
 
         {/* Code cards inline (if any) */}
         {message.codeCards && message.codeCards.length > 0 && (
@@ -898,7 +930,7 @@ function App() {
         {/* Left Panel - Interaction Panel */}
         <div id="left-panel" ref={leftPanelRef} tabIndex={0} className="flex flex-col bg-white focus:outline-none rounded-[10px]">
           {/* Messages area */}
-          <div className="flex-1 overflow-y-auto p-4">
+          <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4">
             {messages.length === 0 && (
               <div className="flex items-center justify-center h-full text-gray-500">
                 <div className="text-center max-w-2xl px-16">
@@ -973,6 +1005,7 @@ function App() {
                 onClick={handleSendMessage}
                 disabled={isLoading || !inputValue.trim()}
                 className={`absolute right-1 top-1 w-8 h-8 rounded-md text-white bg-[#3a7aaf] hover:bg-[#2d6290] disabled:bg-[#c0c0c0] disabled:cursor-not-allowed transition-colors flex items-center justify-center overflow-hidden ${isSubmitAnimating ? 'submit-button-animating' : ''}`}
+                style={isSubmitAnimating ? { backgroundColor: '#3a7aaf' } : {}}
               >
                 <svg
                   className="arrow-icon w-4 h-4"
