@@ -45,6 +45,7 @@ function App() {
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [favoritedCardIds, setFavoritedCardIds] = useState(new Set());
   const [isSubmitAnimating, setIsSubmitAnimating] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
 
   // Refs for resizable panels
   const splitInstanceRef = useRef(null);
@@ -54,6 +55,11 @@ function App() {
   const messagesContainerRef = useRef(null);
   const cardRefsRef = useRef({});
   const fileInputRef = useRef(null);
+  const recognitionRef = useRef(null);
+  const autoSubmitTimerRef = useRef(null);
+  const submitButtonRef = useRef(null);
+  const shouldAutoSubmitRef = useRef(false);
+  const isButtonPressedRef = useRef(false);
 
   // Helper function to determine suggestion icon based on content
   const getSuggestionIcon = (suggestion) => {
@@ -413,6 +419,100 @@ function App() {
     }
   };
 
+  // Initialize speech recognition
+  useEffect(() => {
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const recognition = new SpeechRecognition();
+
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+
+      recognition.onresult = (event) => {
+        // Get all final results
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          if (event.results[i].isFinal) {
+            transcript += event.results[i][0].transcript + ' ';
+          }
+        }
+
+        // Append to input
+        if (transcript) {
+          setInputValue(prev => prev + transcript);
+        }
+      };
+
+      recognition.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        if (event.error !== 'no-speech') {
+          setIsRecording(false);
+          isButtonPressedRef.current = false;
+          shouldAutoSubmitRef.current = false;
+        }
+      };
+
+      recognition.onend = () => {
+        // If button is still pressed, restart recognition
+        if (isButtonPressedRef.current) {
+          try {
+            recognition.start();
+          } catch (error) {
+            console.error('Error restarting recognition:', error);
+          }
+        } else {
+          setIsRecording(false);
+
+          // Auto-submit if user released the button (not an error)
+          if (shouldAutoSubmitRef.current) {
+            shouldAutoSubmitRef.current = false;
+            // Small delay to ensure state updates
+            setTimeout(() => {
+              if (submitButtonRef.current && !submitButtonRef.current.disabled) {
+                submitButtonRef.current.click();
+              }
+            }, 100);
+          }
+        }
+      };
+
+      recognitionRef.current = recognition;
+    }
+  }, []);
+
+  // Handle voice input press (start recording)
+  const handleVoicePress = () => {
+    if (!recognitionRef.current) {
+      alert('Speech recognition is not supported in your browser. Please use Chrome, Edge, or Safari.');
+      return;
+    }
+
+    if (isLoading) return;
+
+    isButtonPressedRef.current = true;
+    shouldAutoSubmitRef.current = false;
+
+    try {
+      recognitionRef.current.start();
+      setIsRecording(true);
+    } catch (error) {
+      console.error('Error starting recognition:', error);
+      setIsRecording(false);
+      isButtonPressedRef.current = false;
+    }
+  };
+
+  // Handle voice input release (stop recording and submit)
+  const handleVoiceRelease = () => {
+    isButtonPressedRef.current = false;
+
+    if (recognitionRef.current && isRecording) {
+      shouldAutoSubmitRef.current = true;
+      recognitionRef.current.stop();
+    }
+  };
+
   // Toggle options menu
   const handleToggleOptions = () => {
     setShowOptionsMenu(!showOptionsMenu);
@@ -421,6 +521,12 @@ function App() {
   // Handle sending a message to Claude
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
+
+    // Clear any pending auto-submit timer
+    if (autoSubmitTimerRef.current) {
+      clearTimeout(autoSubmitTimerRef.current);
+      autoSubmitTimerRef.current = null;
+    }
 
     // Trigger submit button animation (will reset when response received)
     setIsSubmitAnimating(true);
@@ -996,12 +1102,42 @@ function App() {
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyPress={handleKeyPress}
                 placeholder="Ask Positronic..."
-                className="w-full px-3 py-2 pr-12 border border-[#616161] rounded-lg focus:outline-none resize-none bg-white overflow-hidden"
+                className="w-full pl-11 pr-12 py-2 border border-[#616161] rounded-lg focus:outline-none resize-none bg-white overflow-hidden"
                 style={{ fontSize: '11pt', minHeight: 'calc(2.5rem + 1px)' }}
                 rows="1"
                 disabled={isLoading}
               />
               <button
+                onMouseDown={handleVoicePress}
+                onMouseUp={handleVoiceRelease}
+                onMouseLeave={handleVoiceRelease}
+                onTouchStart={handleVoicePress}
+                onTouchEnd={handleVoiceRelease}
+                disabled={isLoading}
+                className={`absolute left-1 top-1 w-8 h-8 rounded-md text-white transition-colors flex items-center justify-center ${
+                  isRecording
+                    ? 'bg-red-500 hover:bg-red-600 animate-pulse'
+                    : 'bg-[#3a7aaf] hover:bg-[#2d6290] disabled:bg-[#c0c0c0]'
+                } disabled:cursor-not-allowed`}
+                title="Hold to speak, release to submit"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                  />
+                </svg>
+              </button>
+              <button
+                ref={submitButtonRef}
                 onClick={handleSendMessage}
                 disabled={isLoading || !inputValue.trim()}
                 className={`absolute right-1 top-1 w-8 h-8 rounded-md text-white bg-[#3a7aaf] hover:bg-[#2d6290] disabled:bg-[#c0c0c0] disabled:cursor-not-allowed transition-colors flex items-center justify-center overflow-hidden ${isSubmitAnimating ? 'submit-button-animating' : ''}`}
