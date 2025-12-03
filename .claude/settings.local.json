@@ -12,7 +12,8 @@
       "Bash(R:*)",
       "Read(//private/tmp/**)",
       "Bash(npm search:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(Rscript:*)"
     ],
     "deny": [],
     "ask": []

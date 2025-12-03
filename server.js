@@ -680,8 +680,12 @@ suppressPackageStartupMessages({
   library(dplyr)
   library(ggplot2)
   library(tidyr)
+  library(tibble)
+  library(scales)
   if (requireNamespace("maps", quietly = TRUE)) library(maps)
   if (requireNamespace("gt", quietly = TRUE)) library(gt)
+  if (requireNamespace("plotly", quietly = TRUE)) library(plotly)
+  if (requireNamespace("gganimate", quietly = TRUE)) library(gganimate)
 })
 
 # Load svglite library
@@ -728,8 +732,12 @@ suppressPackageStartupMessages({
   library(dplyr)
   library(ggplot2)
   library(tidyr)
+  library(tibble)
+  library(scales)
   if (requireNamespace("maps", quietly = TRUE)) library(maps)
   if (requireNamespace("gt", quietly = TRUE)) library(gt)
+  if (requireNamespace("plotly", quietly = TRUE)) library(plotly)
+  if (requireNamespace("gganimate", quietly = TRUE)) library(gganimate)
 })
 
 # Execute user code and check return value type first
