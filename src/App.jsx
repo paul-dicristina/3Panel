@@ -41,6 +41,7 @@ function App() {
 
   // UI state
   const [suggestionsEnabled, setSuggestionsEnabled] = useState(false);
+  const [autoFormatTabular, setAutoFormatTabular] = useState(true);
   const [showConversationsMenu, setShowConversationsMenu] = useState(false);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [favoritedCardIds, setFavoritedCardIds] = useState(new Set());
@@ -105,6 +106,12 @@ function App() {
       setApiKey(storedKey);
     } else {
       setShowApiKeyModal(true);
+    }
+
+    // Load auto format tabular setting
+    const storedAutoFormat = localStorage.getItem('auto_format_tabular');
+    if (storedAutoFormat !== null) {
+      setAutoFormatTabular(storedAutoFormat === 'true');
     }
   }, []);
 
@@ -580,8 +587,8 @@ function App() {
         : [];
 
       // Strip R code blocks from the displayed message text
-      // Matches both ```r and ```R with optional whitespace
-      const displayText = response.text.replace(/```[rR]\s*\n[\s\S]*?```/g, '').trim();
+      // Matches both ```r and ```R with optional whitespace and content
+      const displayText = response.text.replace(/```[rR]\s*[\s\S]*?```/g, '').trim();
 
       // Debug: Log if suggestions are enabled and what the message contains
       console.log('Suggestions enabled:', suggestionsEnabled);
@@ -660,7 +667,7 @@ function App() {
   const executeSelectedCode = async (code, cardId) => {
     try {
       // Execute the code via backend
-      const result = await executeRCode(code);
+      const result = await executeRCode(code, autoFormatTabular);
       setCurrentOutput(result);
 
       // Store output with the card using the provided cardId
@@ -987,6 +994,18 @@ function App() {
                     }}
                   >
                     Posit AI...
+                  </button>
+                  <div className="border-t border-gray-300 my-1"></div>
+                  <button
+                    className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 transition-colors flex items-center justify-between"
+                    onClick={() => {
+                      const newValue = !autoFormatTabular;
+                      setAutoFormatTabular(newValue);
+                      localStorage.setItem('auto_format_tabular', newValue.toString());
+                    }}
+                  >
+                    <span>Auto Format Tabular Data</span>
+                    <span className="ml-2">{autoFormatTabular ? '✓' : ''}</span>
                   </button>
                   <div className="border-t border-gray-300 my-1"></div>
                   <button

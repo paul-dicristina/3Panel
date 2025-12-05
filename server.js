@@ -94,9 +94,11 @@ CRITICAL FORMATTING RULES:
 - Do NOT include ANY data, numbers, statistics, or results in your text response
 - Do NOT show dataset rows, summaries, or any computed values in your text
 - NEVER print or display data outside of R code blocks
+- NEVER include R code, variable names, or function calls in your conversational text - ONLY in code blocks
 - Put ALL executable R code in code blocks
 - Each code block should be complete and self-contained
 - The R code will be executed automatically and results will appear in the output panel
+- Your conversational text should NEVER contain code blocks - they will be automatically extracted and shown separately
 
 CRITICAL - R WORKSPACE PERSISTENCE - READ CAREFULLY:
 The R environment has PERSISTENT WORKSPACE across all code executions in the same conversation:
@@ -577,9 +579,9 @@ When the user asks you to modify or improve a plot, you can see exactly what it 
     console.log(`Total messages: ${formattedMessages.length}\n`);
 
     // Call Claude API
-    // Using Claude 3 Opus - the most powerful model for best code generation
+    // Using Claude Opus 4.5 - most capable model for code generation
     const message = await anthropic.messages.create({
-      model: 'claude-3-opus-20240229',
+      model: 'claude-opus-4-5-20251101',
       max_tokens: 4096,
       system: systemPrompt,
       messages: formattedMessages
@@ -630,13 +632,15 @@ app.post('/api/execute-r', async (req, res) => {
   const htmlPath = join(tempDir, `widget_${timestamp}.html`);
 
   try {
-    const { code } = req.body;
+    const { code, autoFormatTabular = true } = req.body;
 
     if (!code || typeof code !== 'string') {
       return res.status(400).json({
         error: 'R code is required'
       });
     }
+
+    console.log('Auto format tabular:', autoFormatTabular);
 
     // Create temp directory if it doesn't exist
     try {
@@ -754,6 +758,17 @@ suppressPackageStartupMessages({
 .is_gt <- FALSE
 
 if (!is.null(.value)) {
+  # Auto-format tabular data with gt if enabled
+  ${autoFormatTabular ? `
+  if ((is.data.frame(.value) || inherits(.value, "tbl_df") || inherits(.value, "tibble")) &&
+      !inherits(.value, "gt_tbl") &&
+      !inherits(.value, "htmlwidget") &&
+      requireNamespace("gt", quietly = TRUE)) {
+    .value <- gt::gt(.value)
+    .is_gt <- TRUE
+  }
+  ` : ''}
+
   # Check if it's already an htmlwidget
   if (inherits(.value, "htmlwidget")) {
     .is_widget <- TRUE
@@ -1151,6 +1166,13 @@ For each section:
 - Be concise and specific
 - Base your report ENTIRELY on the R output shown below
 
+SPECIAL FORMATTING for "structure" section:
+- After your paragraph describing the structure, add TWO newlines, then add a line that starts with "Columns:\n"
+- On the next line, show a horizontal list of the first 10 column names, each followed by a comma, then TWO non-breaking spaces (Unicode \u00A0\u00A0)
+- If there are more than 10 columns, the last item in the list should be a count like "10 more cols" instead of the 10th column name
+- Example with 8 columns: "The dataset has 100 rows and 8 columns.\n\nColumns:\nCountry,\u00A0\u00A0Region,\u00A0\u00A0Year,\u00A0\u00A0Population,\u00A0\u00A0GDP,\u00A0\u00A0Unemployment,\u00A0\u00A0Inflation,\u00A0\u00A0Exports,"
+- Example with 15 columns: "The dataset has 200 rows and 15 columns.\n\nColumns:\nCountry,\u00A0\u00A0Region,\u00A0\u00A0Year,\u00A0\u00A0Population,\u00A0\u00A0GDP,\u00A0\u00A0Unemployment,\u00A0\u00A0Inflation,\u00A0\u00A0Exports,\u00A0\u00A0Imports,\u00A0\u00A05 more cols"
+
 CRITICAL: Return ONLY valid JSON. Do NOT include any text before or after the JSON object.`;
 
     if (suggestionsEnabled) {
@@ -1170,7 +1192,7 @@ ${rOutput.stderr ? `\nWarnings/Messages:\n${rOutput.stderr}\n` : ''}
 Write your comprehensive report in JSON format based on this actual output.`;
 
     const phase2Response = await anthropic.messages.create({
-      model: 'claude-3-opus-20240229',
+      model: 'claude-opus-4-5-20251101',
       max_tokens: 2048,
       system: reportSystemPrompt,
       messages: [{ role: 'user', content: reportPrompt }]
