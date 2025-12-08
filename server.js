@@ -8,7 +8,7 @@
 import express from 'express';
 import cors from 'cors';
 import Anthropic from '@anthropic-ai/sdk';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { writeFile, unlink, mkdir } from 'fs/promises';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
@@ -1011,6 +1011,85 @@ app.post('/api/upload-data', upload.single('file'), async (req, res) => {
   } catch (error) {
     console.error('Error uploading file:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/list-dataframes
+ * List all data.frame and tbl_df objects currently in the R workspace
+ */
+app.get('/api/list-dataframes', async (req, res) => {
+  const tempDir = join(tmpdir(), '3panel-r-execution');
+  const workspacePath = join(tempDir, 'workspace.RData');
+
+  try {
+    // R code to list all data frames with their dimensions
+    const rCode = `
+# Load workspace if it exists
+if (file.exists("${workspacePath.replace(/\\/g, '\\\\')}")) {
+  load("${workspacePath.replace(/\\/g, '\\\\')}")
+}
+
+# Get all objects in workspace
+objects_list <- ls()
+
+# Extract info about data frames and tibbles
+df_info <- lapply(objects_list, function(name) {
+  obj <- tryCatch(get(name), error = function(e) NULL)
+  if (!is.null(obj) && (is.data.frame(obj) || inherits(obj, "tbl_df"))) {
+    dims <- dim(obj)
+    list(name = name, rows = dims[1], cols = dims[2])
+  }
+})
+
+# Remove NULL entries
+df_info <- Filter(Negate(is.null), df_info)
+
+# Convert to JSON
+cat(jsonlite::toJSON(df_info, auto_unbox = TRUE))
+`;
+
+    // Execute R code
+    const result = await new Promise((resolve, reject) => {
+      const rProcess = spawn('R', ['--vanilla', '--slave'], {
+        cwd: tempDir
+      });
+
+      let stdout = '';
+      let stderr = '';
+
+      rProcess.stdout.on('data', (data) => {
+        stdout += data.toString();
+      });
+
+      rProcess.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+
+      rProcess.on('close', (code) => {
+        if (code !== 0) {
+          reject(new Error(`R process exited with code ${code}: ${stderr}`));
+        } else {
+          resolve({ stdout, stderr });
+        }
+      });
+
+      rProcess.stdin.write(rCode);
+      rProcess.stdin.end();
+    });
+
+    // Parse the JSON output from R
+    let dataframes = [];
+    try {
+      dataframes = JSON.parse(result.stdout.trim());
+    } catch (e) {
+      console.error('Error parsing R output:', e);
+    }
+
+    res.json({ dataframes });
+  } catch (error) {
+    console.error('Error listing data frames:', error);
+    res.status(500).json({ error: error.message, dataframes: [] });
   }
 });
 

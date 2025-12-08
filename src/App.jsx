@@ -40,6 +40,8 @@ function App() {
   const [currentCode, setCurrentCode] = useState('');
 
   // UI state
+  const [viewMode, setViewMode] = useState('explore'); // 'explore' or 'data'
+  const [dataFrames, setDataFrames] = useState([]);
   const [suggestionsEnabled, setSuggestionsEnabled] = useState(false);
   const [autoFormatTabular, setAutoFormatTabular] = useState(true);
   const [showConversationsMenu, setShowConversationsMenu] = useState(false);
@@ -51,6 +53,8 @@ function App() {
   // Refs for resizable panels
   const splitInstanceRef = useRef(null);
   const splitVerticalInstanceRef = useRef(null);
+  const savedHorizontalSizesRef = useRef([50, 50]);
+  const savedVerticalSizesRef = useRef([50, 50]);
   const textareaRef = useRef(null);
   const leftPanelRef = useRef(null);
   const messagesContainerRef = useRef(null);
@@ -161,10 +165,13 @@ function App() {
 
   // Initialize Split.js for resizable panels
   useEffect(() => {
+    // Only initialize Split.js in explore mode
+    if (viewMode !== 'explore') return;
+
     // Horizontal split (left panel | right column)
     if (!splitInstanceRef.current) {
       splitInstanceRef.current = Split(['#left-panel', '#right-column'], {
-        sizes: [50, 50],
+        sizes: savedHorizontalSizesRef.current,
         minSize: [300, 300],
         gutterSize: 8,
         cursor: 'col-resize'
@@ -175,7 +182,7 @@ function App() {
     if (!splitVerticalInstanceRef.current) {
       splitVerticalInstanceRef.current = Split(['#right-top-panel', '#right-bottom-panel'], {
         direction: 'vertical',
-        sizes: [50, 50],
+        sizes: savedVerticalSizesRef.current,
         minSize: [100, 100],
         gutterSize: 8,
         cursor: 'row-resize'
@@ -185,15 +192,19 @@ function App() {
     // Cleanup
     return () => {
       if (splitInstanceRef.current) {
+        // Save current sizes before destroying
+        savedHorizontalSizesRef.current = splitInstanceRef.current.getSizes();
         splitInstanceRef.current.destroy();
         splitInstanceRef.current = null;
       }
       if (splitVerticalInstanceRef.current) {
+        // Save current sizes before destroying
+        savedVerticalSizesRef.current = splitVerticalInstanceRef.current.getSizes();
         splitVerticalInstanceRef.current.destroy();
         splitVerticalInstanceRef.current = null;
       }
     };
-  }, []);
+  }, [viewMode]);
 
   // Handle keyboard navigation for code cards
   useEffect(() => {
@@ -245,6 +256,24 @@ function App() {
       }
     };
   }, [codeCards, selectedCardId]);
+
+  // Fetch dataframes when viewMode is 'data'
+  useEffect(() => {
+    if (viewMode === 'data') {
+      const fetchDataFrames = async () => {
+        try {
+          const response = await fetch('http://localhost:3001/api/list-dataframes');
+          if (response.ok) {
+            const data = await response.json();
+            setDataFrames(data.dataframes || []);
+          }
+        } catch (error) {
+          console.error('Error fetching dataframes:', error);
+        }
+      };
+      fetchDataFrames();
+    }
+  }, [viewMode]);
 
   // Handle API key save
   const handleSaveApiKey = (key) => {
@@ -921,8 +950,44 @@ function App() {
   return (
     <div className="h-screen flex flex-col bg-gray-100">
       {/* Header */}
-      <header className="bg-[#edeff0] h-[26px]">
+      <header className="bg-[#edeff0] h-[26px] relative">
         <div className="flex items-center justify-between h-full px-3">
+          {/* iOS-style segmented control - HIDDEN FOR NOW */}
+          {/* <div className="absolute left-1/2 transform -translate-x-1/2 flex items-center h-full">
+            <div className="relative inline-flex bg-gray-200 rounded-md p-0.5">
+              <div
+                className="absolute top-0.5 bottom-0.5 bg-white rounded transition-all duration-200 ease-out shadow-sm"
+                style={{
+                  ...(viewMode === 'explore'
+                    ? { left: '2px' }
+                    : { right: '2px' }
+                  ),
+                  width: 'calc(50% - 2px)'
+                }}
+              />
+              <button
+                onClick={() => setViewMode('explore')}
+                className={`relative z-10 px-3.5 py-0.5 text-xs font-medium transition-colors duration-200 ${
+                  viewMode === 'explore'
+                    ? 'text-gray-900'
+                    : 'text-gray-600'
+                }`}
+              >
+                Explore
+              </button>
+              <button
+                onClick={() => setViewMode('data')}
+                className={`relative z-10 px-3.5 py-0.5 text-xs font-medium transition-colors duration-200 ${
+                  viewMode === 'data'
+                    ? 'text-gray-900'
+                    : 'text-gray-600'
+                }`}
+              >
+                Data
+              </button>
+            </div>
+          </div> */}
+
           <div className="flex items-center gap-2 h-full relative">
             <img
               src="/load-data.png"
@@ -1051,9 +1116,10 @@ function App() {
       </header>
 
       {/* Main content area */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left Panel - Interaction Panel */}
-        <div id="left-panel" ref={leftPanelRef} tabIndex={0} className="flex flex-col bg-white focus:outline-none rounded-[10px]">
+      {viewMode === 'explore' ? (
+        <div key="explore-mode" className="flex-1 flex overflow-hidden">
+          {/* Left Panel - Interaction Panel */}
+          <div id="left-panel" ref={leftPanelRef} tabIndex={0} className="flex flex-col bg-white focus:outline-none rounded-[10px]">
           {/* Messages area */}
           <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4">
             {messages.length === 0 && (
@@ -1230,7 +1296,26 @@ function App() {
             )}
           </div>
         </div>
-      </div>
+        </div>
+      ) : (
+        <div key="data-mode" className="flex-1 overflow-hidden bg-white m-4 rounded-lg p-6">
+          <h2 className="text-2xl font-semibold mb-4">Loaded Datasets</h2>
+          {dataFrames.length > 0 ? (
+            <div className="space-y-2">
+              {dataFrames.map((df, index) => (
+                <div key={index} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                  <div>
+                    <span className="font-semibold text-lg">{df.name}</span>
+                    <span className="text-gray-600 ml-4">{df.rows} rows × {df.cols} columns</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-gray-500">No data frames loaded</p>
+          )}
+        </div>
+      )}
 
       {/* Hidden file input for load data */}
       <input

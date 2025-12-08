@@ -13,7 +13,10 @@
       "Read(//private/tmp/**)",
       "Bash(npm search:*)",
       "Bash(npm install:*)",
-      "Bash(Rscript:*)"
+      "Bash(Rscript:*)",
+      "Bash(npx babel:*)",
+      "Bash(git checkout:*)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []
