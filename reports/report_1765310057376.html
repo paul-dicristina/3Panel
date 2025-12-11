@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3Panel Analysis Report</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+      line-height: 1.6;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem;
+      color: #333;
+      background: #f9f9f9;
+    }
+    .header {
+      border-bottom: 3px solid #3a7aaf;
+      padding-bottom: 1rem;
+      margin-bottom: 2rem;
+    }
+    h1 {
+      color: #2c5282;
+      margin: 0;
+      font-size: 2.5rem;
+    }
+    .date {
+      color: #666;
+      font-size: 0.9rem;
+      margin-top: 0.5rem;
+    }
+    h2 {
+      color: #3a7aaf;
+      margin-top: 2rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 2px solid #e2e8f0;
+    }
+    h3 {
+      color: #4a5568;
+      margin-top: 1.5rem;
+    }
+    p {
+      margin: 1rem 0;
+    }
+    pre {
+      background: #2d3748;
+      color: #e2e8f0;
+      padding: 1rem;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 1.5rem 0;
+    }
+    pre.r-code {
+      background: #1a202c;
+      border-left: 4px solid #3a7aaf;
+    }
+    code {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 0.9rem;
+    }
+    strong {
+      color: #2d3748;
+    }
+    .footer {
+      margin-top: 3rem;
+      padding-top: 1rem;
+      border-top: 1px solid #e2e8f0;
+      text-align: center;
+      color: #718096;
+      font-size: 0.875rem;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>3Panel Analysis Report</h1>
+    <div class="date">12/9/2025</div>
+  </div>
+  <div class="content">
+    <p><br><h1>Analysis Session</h1></p>
+<p>This report was generated from a 3Panel analysis session.</p>
+<h2>Conversation</h2>
+<h3>User Query 1</h3>
+<p>Loaded lex.csv</p>
+<p><strong>Response:</strong></p>
+
+<h3>User Query 3</h3>
+<p>pivot longer - remove leading X from year and ensure it is numeric datatype</p>
+<p><strong>Response:</strong></p>
+<p>I'll clean up the column names and pivot the data to long format.</p>
+<pre class="r-code"><code>library(tidyr)
+library(dplyr)
+<h1>Pivot to long format, clean year column</h1>
+lex_long <- lex %>%
+  pivot_longer(
+    cols = -c(geo, name),
+    names_to = "year",
+    values_to = "life_expectancy"
+  ) %>%
+  mutate(
+    year = as.numeric(sub("^X", "", year))
+  )
+<h1>Check the result</h1>
+cat("Dimensions:", nrow(lex_long), "rows x", ncol(lex_long), "columns\n")
+str(lex_long)
+head(lex_long, 10)
+</code></pre>
+<h3>User Query 5</h3>
+<p>create a line plot for the 5 countries with the greatest increase in life_expectancy from 1900 to 2025</p>
+<p><strong>Response:</strong></p>
+<p>I'll identify the top 5 countries by life expectancy increase and create the line plot.</p>
+<pre class="r-code"><code>library(ggplot2)
+library(dplyr)
+<h1>Calculate increase from 1900 to 2025 for each country</h1>
+top5_countries <- lex_long %>%
+  filter(year %in% c(1900, 2025)) %>%
+  pivot_wider(names_from = year, values_from = life_expectancy, names_prefix = "y") %>%
+  mutate(increase = y2025 - y1900) %>%
+  filter(!is.na(increase)) %>%
+  arrange(desc(increase)) %>%
+  head(5) %>%
+  pull(name)
+<p>cat("Top 5 countries by life expectancy increase (1900-2025):\n")<br>print(top5_countries)</p>
+<h1>Filter data for these countries and plot</h1>
+lex_long %>%
+  filter(name %in% top5_countries) %>%
+  ggplot(aes(x = year, y = life_expectancy, color = name)) +
+  geom_line(linewidth = 1) +
+  theme_minimal() +
+  labs(
+    title = "Life Expectancy Over Time",
+    subtitle = "Top 5 countries with greatest increase (1900-2025)",
+    x = "Year",
+    y = "Life Expectancy (years)",
+    color = "Country"
+  ) +
+  theme(legend.position = "bottom")
+</code></pre>
+<h3>User Query 7</h3>
+<p>show the plot only from 1900 to 2025</p>
+<p><strong>Response:</strong></p>
+<p>I'll adjust the x-axis to show only 1900-2025.</p>
+<pre class="r-code"><code>library(ggplot2)
+library(dplyr)
+<p>lex_long %>%<br>  filter(name %in% top5_countries, year >= 1900, year <= 2025) %>%<br>  ggplot(aes(x = year, y = life_expectancy, color = name)) +<br>  geom_line(linewidth = 1) +<br>  theme_minimal() +<br>  labs(<br>    title = "Life Expectancy Over Time",<br>    subtitle = "Top 5 countries with greatest increase (1900-2025)",<br>    x = "Year",<br>    y = "Life Expectancy (years)",<br>    color = "Country"<br>  ) +<br>  theme(legend.position = "bottom")<br></code></pre></p>
+<h3>User Query 9</h3>
+<p>create a line plot for the 5 countries with the smallest increase in life_expectancy from 1900 to 2025</p>
+<p><strong>Response:</strong></p>
+<p>I'll create the plot for the 5 countries with the smallest increase.</p>
+<pre class="r-code"><code>library(ggplot2)
+library(dplyr)
+<h1>Calculate increase from 1900 to 2025 and find bottom 5</h1>
+bottom5_countries <- lex_long %>%
+  filter(year %in% c(1900, 2025)) %>%
+  pivot_wider(names_from = year, values_from = life_expectancy, names_prefix = "y") %>%
+  mutate(increase = y2025 - y1900) %>%
+  filter(!is.na(increase)) %>%
+  arrange(increase) %>%
+  head(5) %>%
+  pull(name)
+<p>cat("Bottom 5 countries by life expectancy increase (1900-2025):\n")<br>print(bottom5_countries)</p>
+<h1>Filter data for these countries and plot</h1>
+lex_long %>%
+  filter(name %in% bottom5_countries, year >= 1900, year <= 2025) %>%
+  ggplot(aes(x = year, y = life_expectancy, color = name)) +
+  geom_line(linewidth = 1) +
+  theme_minimal() +
+  labs(
+    title = "Life Expectancy Over Time",
+    subtitle = "5 countries with smallest increase (1900-2025)",
+    x = "Year",
+    y = "Life Expectancy (years)",
+    color = "Country"
+  ) +
+  theme(legend.position = "bottom")
+</code></pre>
+<h3>User Query 11</h3>
+<p>explain the poor outcomes in this most recent plot</p>
+<p><strong>Response:</strong></p>
+<p>Looking at the plot, I can see several patterns that explain the poor life expectancy gains for these 5 countries:</p>
+<p><strong>HIV/AIDS Epidemic (1990s-2000s)</strong><br>The most striking feature is the sharp decline in Lesotho, Eswatini, and Mozambique starting around 1990. These southern African nations were devastated by the HIV/AIDS crisis, which caused life expectancy to drop dramatically—Lesotho fell from ~60 to below 45 years.</p>
+<p><strong>Conflict and Instability</strong><br>- <strong>Somalia</strong> shows a major dip around 1990, coinciding with the civil war that began in 1991 and ongoing instability<br>- <strong>Central African Republic</strong> has fluctuations reflecting chronic political instability and conflict<br>- <strong>Mozambique</strong> also experienced a brutal civil war (1977-1992) visible in its flat/declining period</p>
+<p><strong>Already Higher Starting Points</strong><br>Unlike the top 5 improvers (which started around 20-25 years in 1900), these countries started at 35-40 years—leaving less room for dramatic gains.</p>
+<p><strong>Recent Recovery</strong><br>The good news visible in the plot: since ~2005, most show recovery as antiretroviral treatments became available and conflicts subsided. Lesotho and Eswatini are climbing back toward 60 years.</p>
+<p><strong>Key Takeaway</strong>: These aren't countries that failed to develop—they're countries that faced catastrophic health and humanitarian crises (primarily HIV/AIDS in southern Africa, conflict in Somalia/CAR) that erased decades of progress.</p>
+<h2>Favorited Outputs</h2>
+<p>The following code blocks and outputs were marked as favorites during the analysis:</p>
+<h3>Create visualization/plot</h3>
+<p>Using ggplot, geom_line, plot()</p>
+<pre class="r-code"><code>library(ggplot2)
+library(dplyr)
+<h1>Calculate increase from 1900 to 2025 for each country</h1>
+top5_countries <- lex_long %>%
+  filter(year %in% c(1900, 2025)) %>%
+  pivot_wider(names_from = year, values_from = life_expectancy, names_prefix = "y") %>%
+  mutate(increase = y2025 - y1900) %>%
+  filter(!is.na(increase)) %>%
+  arrange(desc(increase)) %>%
+  head(5) %>%
+  pull(name)
+<p>cat("Top 5 countries by life expectancy increase (1900-2025):\n")<br>print(top5_countries)</p>
+<h1>Filter data for these countries and plot</h1>
+lex_long %>%
+  filter(name %in% top5_countries) %>%
+  ggplot(aes(x = year, y = life_expectancy, color = name)) +
+  geom_line(linewidth = 1) +
+  theme_minimal() +
+  labs(
+    title = "Life Expectancy Over Time",
+    subtitle = "Top 5 countries with greatest increase (1900-2025)",
+    x = "Year",
+    y = "Life Expectancy (years)",
+    color = "Country"
+  ) +
+  theme(legend.position = "bottom")
+</code></pre>
+<p>*[Plot output available in interactive session]*</p>
+<h3>Create visualization/plot</h3>
+<p>Using ggplot, geom_line, plot()</p>
+<pre class="r-code"><code>library(ggplot2)
+library(dplyr)
+<h1>Calculate increase from 1900 to 2025 and find bottom 5</h1>
+bottom5_countries <- lex_long %>%
+  filter(year %in% c(1900, 2025)) %>%
+  pivot_wider(names_from = year, values_from = life_expectancy, names_prefix = "y") %>%
+  mutate(increase = y2025 - y1900) %>%
+  filter(!is.na(increase)) %>%
+  arrange(increase) %>%
+  head(5) %>%
+  pull(name)
+<p>cat("Bottom 5 countries by life expectancy increase (1900-2025):\n")<br>print(bottom5_countries)</p>
+<h1>Filter data for these countries and plot</h1>
+lex_long %>%
+  filter(name %in% bottom5_countries, year >= 1900, year <= 2025) %>%
+  ggplot(aes(x = year, y = life_expectancy, color = name)) +
+  geom_line(linewidth = 1) +
+  theme_minimal() +
+  labs(
+    title = "Life Expectancy Over Time",
+    subtitle = "5 countries with smallest increase (1900-2025)",
+    x = "Year",
+    y = "Life Expectancy (years)",
+    color = "Country"
+  ) +
+  theme(legend.position = "bottom")
+</code></pre>
+<p>*[Plot output available in interactive session]*</p>
+<p>---</p>
+<p>*Report generated by 3Panel Data Analyzer*<br></p>
+  </div>
+  <div class="footer">
+    Report generated by 3Panel Data Analyzer
+  </div>
+</body>
+</html>

@@ -74,9 +74,13 @@ export async function sendMessageToClaude(apiKey, userMessage, conversationHisto
     // Extract R code blocks from the response
     const rCodeBlocks = extractRCodeBlocks(assistantMessage);
 
+    // Extract reactive component specs from the response
+    const reactiveComponents = extractReactiveComponents(assistantMessage);
+
     return {
       text: assistantMessage,
       rCodeBlocks,
+      reactiveComponents,
       fullResponse: data
     };
   } catch (error) {
@@ -183,4 +187,34 @@ function generateCodeSummary(code) {
       description: firstLine.length < 60 ? firstLine : firstLine + '...'
     };
   }
+}
+
+/**
+ * Extract reactive component specs from markdown text
+ * Looks for JSON code blocks marked with special comment
+ * @param {string} text - The markdown text containing code blocks
+ * @returns {Array} Array of reactive component spec objects
+ */
+function extractReactiveComponents(text) {
+  // Match JSON code blocks that contain reactive component specs
+  // Looking for: ```json followed by a block containing "type": "reactive-component"
+  const jsonCodeRegex = /```json\s*\n([\s\S]*?)```/g;
+  const components = [];
+  let match;
+
+  while ((match = jsonCodeRegex.exec(text)) !== null) {
+    const jsonText = match[1].trim();
+    try {
+      const parsed = JSON.parse(jsonText);
+      // Check if this is a reactive component spec
+      if (parsed.type === 'reactive-component') {
+        components.push(parsed);
+      }
+    } catch (e) {
+      // Not valid JSON or not a reactive component, skip
+      console.log('Skipped non-reactive JSON block');
+    }
+  }
+
+  return components;
 }

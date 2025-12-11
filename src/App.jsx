@@ -282,6 +282,270 @@ function App() {
     setShowApiKeyModal(false);
   };
 
+  // Handle Quarto report creation
+  const handleCreateReport = async () => {
+    console.log('=== REPORT GENERATION START ===');
+
+    // Open a blank window immediately to avoid popup blockers
+    // This must happen synchronously in the click handler
+    const reportWindow = window.open('about:blank', '_blank');
+    if (reportWindow) {
+      reportWindow.document.write(`<html>
+<head>
+  <style>
+    body {
+      font-family: system-ui;
+      padding: 40px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+    }
+    .spinner {
+      width: 34px;
+      height: 34px;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h2>Generating report...</h2>
+  <p>Please wait while your report is being created.</p>
+  <img src="/animated-diamond-loop.svg" alt="Loading..." class="spinner" />
+</body>
+</html>`);
+    }
+
+    try {
+      const favoritedCards = codeCards.filter(card => favoritedCardIds.has(card.id));
+      console.log('Step 1: Favorited cards filtered:', favoritedCards.length);
+
+      // Generate intelligent descriptions using Claude
+      let descriptions = [];
+      console.log('Step 2: Starting Claude API call for descriptions...');
+      try {
+        const descriptionsPrompt = `Generate concise narrative descriptions for the following outputs in a report. For each item, provide a 1-2 sentence description that explains what the visualization or table shows and what insights can be drawn from it. Do NOT mention R code, functions, or libraries - only describe what the output shows.
+
+${favoritedCards.map((card, idx) => {
+  // Determine if this is a chart/plot or a table
+  const hasPlot = card.output?.plots?.some(plot => plot.type !== 'html');
+  const hasTable = card.output?.plots?.some(plot => plot.type === 'html') || card.output?.tables?.length > 0;
+  const outputType = hasPlot ? 'Chart/Visualization' : (hasTable ? 'Table' : 'Output');
+
+  return `
+${outputType} ${idx + 1}:
+R Code: ${card.code}
+Output summary: ${card.output?.output || 'No text output'}`;
+}).join('\n')}
+
+Please respond with a JSON object in this format:
+{
+  "descriptions": ["description for item 1", "description for item 2", ...]
+}`;
+
+        console.log('Sending prompt to Claude API...');
+        const claudeResponse = await sendMessageToClaude(apiKey, descriptionsPrompt, []);
+        console.log('Claude API response received:', claudeResponse.text.substring(0, 200));
+
+        const jsonMatch = claudeResponse.text.match(/\{[\s\S]*"descriptions"[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          descriptions = parsed.descriptions || [];
+          console.log('Successfully parsed descriptions from Claude:', descriptions.length);
+        } else {
+          console.warn('No JSON match found in Claude response');
+        }
+      } catch (e) {
+        console.error('Claude API call failed:', e);
+        console.warn('Could not get descriptions from Claude, using code-based descriptions');
+        // Generate basic descriptions from the R code
+        descriptions = favoritedCards.map(card => {
+          const code = card.code.toLowerCase();
+          const hasPlot = card.output?.plots?.some(plot => plot.type !== 'html');
+          const hasTable = card.output?.plots?.some(plot => plot.type === 'html') || card.output?.tables?.length > 0;
+
+          if (hasTable && !hasPlot) {
+            return 'This table presents key data values and statistics from the dataset in a structured format.';
+          } else if (code.includes('ggplot') || code.includes('plot(')) {
+            return 'This visualization displays the relationship between variables in the dataset, showing patterns and trends in the data.';
+          } else if (code.includes('summary') || code.includes('str(')) {
+            return 'This output provides statistical summaries and descriptive information about the dataset.';
+          } else {
+            return 'This analysis result shows key findings from the data exploration.';
+          }
+        });
+        console.log('Using fallback descriptions:', descriptions.length);
+      }
+
+      console.log('Step 3: Generating report data...');
+      // Generate report data from conversation and favorited outputs
+      const reportData = generateQuartoReport(messages, codeCards, favoritedCardIds, descriptions);
+      console.log('Report data generated:', {
+        title: reportData.title,
+        findingsCount: reportData.findings.length,
+        hasFindings: reportData.findings.length > 0
+      });
+
+      console.log('Step 4: Sending to backend...');
+      // Send to backend to render
+      const response = await fetch('http://localhost:3001/api/create-quarto-report', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(reportData)
+      });
+
+      console.log('Backend response status:', response.status);
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Backend error response:', errorText);
+        throw new Error(`Failed to create report: ${response.status} ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('Backend result:', result);
+
+      console.log('Step 5: Opening report...');
+      // Navigate the pre-opened window to the report URL
+      if (result.htmlPath && reportWindow) {
+        const reportUrl = `http://localhost:3001/reports/${result.htmlFilename}`;
+        console.log('Opening report URL:', reportUrl);
+        reportWindow.location.href = reportUrl;
+        console.log('=== REPORT GENERATION SUCCESS ===');
+      } else if (!reportWindow) {
+        console.error('Report window was blocked by popup blocker');
+        alert(`Report generated successfully! Please enable popups or open manually:\nhttp://localhost:3001/reports/${result.htmlFilename}`);
+      } else {
+        console.error('No htmlPath in result');
+        if (reportWindow) reportWindow.close();
+      }
+    } catch (error) {
+      console.error('=== REPORT GENERATION FAILED ===');
+      console.error('Error details:', error);
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
+
+      // Close the loading window and show error
+      if (reportWindow) {
+        reportWindow.close();
+      }
+      alert('Failed to create report: ' + error.message);
+    }
+  };
+
+  // Generate report data from conversation
+  const generateQuartoReport = (messages, codeCards, favoritedCardIds, descriptions = []) => {
+    const timestamp = new Date().toLocaleDateString();
+
+    // Generate a meaningful title from the conversation context
+    let title = 'Data Analysis Report';
+    const userMessages = messages.filter(m => m.role === 'user');
+    if (userMessages.length > 0) {
+      const firstMsg = userMessages[0].content;
+      // Try to extract meaningful dataset name or topic
+      if (firstMsg.toLowerCase().includes('load')) {
+        const match = firstMsg.match(/load(?:ed)?\s+(\w+)/i);
+        if (match) title = `${match[1]} Dataset Analysis`;
+      } else if (firstMsg.length < 60) {
+        title = firstMsg;
+      }
+    }
+
+    // Get favorited cards with their outputs
+    const favoritedCards = codeCards.filter(card => favoritedCardIds.has(card.id));
+
+    // Debug: log card outputs to console
+    console.log('Favorited cards for report:', favoritedCards.map(card => ({
+      id: card.id,
+      hasOutput: !!card.output,
+      outputKeys: card.output ? Object.keys(card.output) : [],
+      hasTables: !!card.output?.tables,
+      tableCount: card.output?.tables?.length || 0,
+      hasPlots: !!card.output?.plots,
+      plotCount: card.output?.plots?.length || 0,
+      // Check the actual card.output structure
+      fullOutput: card.output
+    })));
+
+    // Also log the raw first card's output structure
+    if (favoritedCards.length > 0) {
+      console.log('First favorited card full output:', JSON.stringify(favoritedCards[0].output, null, 2));
+    }
+
+    // Build findings sections from favorited outputs
+    const findings = favoritedCards.map((card, index) => {
+      // Separate visual plots from HTML tables
+      const plots = [];
+      const tables = [];
+
+      if (card.output?.plots) {
+        card.output.plots.forEach(plot => {
+          if (plot.type === 'html') {
+            // HTML widgets are tables (gt tables, formattable, etc.)
+            tables.push(plot);
+          } else {
+            // SVG/image plots
+            plots.push(plot);
+          }
+        });
+      }
+
+      // Also include tables from special outputs (like dataset diagnostics)
+      if (card.output?.tables) {
+        // These are already in the right format
+        if (Array.isArray(card.output.tables)) {
+          tables.push(...card.output.tables);
+        }
+      }
+
+      const finding = {
+        title: null, // Will be extracted from SVG title tag
+        description: descriptions[index] || 'This visualization shows the relationship between the variables in the dataset.',
+        code: card.code,
+        plots: plots,
+        tables: tables,
+        textOutput: card.output?.output || ''
+      };
+
+      // Debug log each finding
+      console.log(`Finding ${index + 1}:`, {
+        hasPlots: finding.plots.length > 0,
+        plotCount: finding.plots.length,
+        hasTables: finding.tables.length > 0,
+        tableCount: finding.tables.length,
+        tableTypes: finding.tables.map(t => t.type || typeof t),
+        hasTextOutput: !!finding.textOutput
+      });
+
+      return finding;
+    });
+
+    // Generate a brief summary of the analysis
+    let summary = 'This paragraph should be a brief summary of the analysis done in the conversation. Describe the dataset and outline the questions asked in the prompts.';
+
+    // Try to generate a more intelligent summary from the conversation
+    if (userMessages.length > 0) {
+      const datasetMention = userMessages[0].content.match(/\b\w+\.csv\b/i);
+      const datasetName = datasetMention ? datasetMention[0].replace('.csv', '') : 'the dataset';
+      const numQuestions = userMessages.length;
+
+      summary = `This report presents ${findings.length} key finding${findings.length !== 1 ? 's' : ''} from an analysis of ${datasetName}. `;
+      summary += `The analysis addressed ${numQuestions} question${numQuestions !== 1 ? 's' : ''} focused on exploring patterns, relationships, and insights within the data.`;
+    }
+
+    return {
+      title,
+      date: timestamp,
+      summary,
+      findings,
+      hasQuarto: false // Will be detected by backend
+    };
+  };
+
   // Handle file selection for load data
   const handleFileSelect = async (event) => {
     const file = event.target.files[0];
@@ -314,7 +578,12 @@ function App() {
         }
 
         // Use the new two-phase load-and-report endpoint for accurate reporting
-        const loadMessage = `Loaded ${filename}`;
+        // Sanitize the filename to get the R variable name (same logic as server)
+        let sanitizedVarName = filename.replace(/\.csv$/i, ''); // Remove .csv extension
+        sanitizedVarName = sanitizedVarName.replace(/[^a-zA-Z0-9_]/g, '_'); // Replace invalid chars
+        sanitizedVarName = sanitizedVarName.replace(/^(\d)/, '_$1'); // Ensure it doesn't start with a number
+
+        const loadMessage = `Loaded ${filename} (dataset variable name: ${sanitizedVarName})`;
         setIsLoading(true);
 
         // Add user message to chat
@@ -825,7 +1094,7 @@ function App() {
                       alt={iconName}
                       className="w-8 h-8 flex-shrink-0"
                     />
-                    <span>{suggestion}</span>
+                    <span className="break-words">{suggestion}</span>
                   </button>
                 );
               })}
@@ -1089,6 +1358,15 @@ function App() {
           <div className="flex items-center gap-2">
             {/* Output panel toolbar icons */}
             <button
+              onClick={handleCreateReport}
+              className="flex items-center gap-1 hover:bg-gray-200 rounded transition-colors px-1"
+              disabled={messages.length === 0}
+            >
+              <img src="/report.png" alt="New Report" className="h-4" />
+              <span className="text-[12px] font-medium text-gray-700">New Report</span>
+            </button>
+            <img src="/separator.png" alt="" className="h-4" />
+            <button
               onClick={handleToggleFavorite}
               className="w-6 h-6 flex items-center justify-center hover:bg-gray-200 rounded transition-colors"
               disabled={!selectedCardId}
@@ -1158,7 +1436,7 @@ function App() {
                               alt={iconName}
                               className="w-8 h-8 flex-shrink-0"
                             />
-                            <span>{suggestion}</span>
+                            <span className="break-words">{suggestion}</span>
                           </button>
                         );
                       })}

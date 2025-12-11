@@ -16,7 +16,9 @@
       "Bash(Rscript:*)",
       "Bash(npx babel:*)",
       "Bash(git checkout:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(npx acorn:*)",
+      "Bash(git stash:*)"
     ],
     "deny": [],
     "ask": []

@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>lex Dataset Analysis</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+      line-height: 1.6;
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 2rem;
+      color: #333;
+      background: #f9f9f9;
+    }
+    .header {
+      border-bottom: 3px solid #3a7aaf;
+      padding-bottom: 1rem;
+      margin-bottom: 2rem;
+    }
+    h1 {
+      color: #2c5282;
+      margin: 0;
+      font-size: 2.5rem;
+    }
+    .date {
+      color: #666;
+      font-size: 0.9rem;
+      margin-top: 0.5rem;
+    }
+    .finding {
+      background: white;
+      padding: 2rem;
+      margin-bottom: 2rem;
+      border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    h2 {
+      color: #3a7aaf;
+      margin-top: 0;
+      padding-bottom: 0.5rem;
+      border-bottom: 2px solid #e2e8f0;
+    }
+    h3 {
+      color: #4a5568;
+      margin-top: 1.5rem;
+      margin-bottom: 0.75rem;
+      font-size: 1.1rem;
+    }
+    .finding-description {
+      margin: 1rem 0 1.5rem 0;
+      color: #4a5568;
+      font-size: 1.05rem;
+    }
+    .code-section, .plots-section, .tables-section, .output-section {
+      margin: 1.5rem 0;
+    }
+    pre {
+      background: #2d3748;
+      color: #e2e8f0;
+      padding: 1rem;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 0.5rem 0;
+    }
+    pre.r-code {
+      background: #1a202c;
+      border-left: 4px solid #3a7aaf;
+    }
+    pre.text-output {
+      background: #f7fafc;
+      color: #2d3748;
+      border: 1px solid #e2e8f0;
+    }
+    code {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 0.9rem;
+    }
+    .plot-container {
+      margin: 1rem 0;
+      text-align: center;
+      background: white;
+      padding: 1rem;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+    }
+    .plot-container img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 4px;
+    }
+    .table-container {
+      margin: 1rem 0;
+      overflow-x: auto;
+    }
+    .table-container table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+    .table-container th,
+    .table-container td {
+      padding: 0.5rem;
+      text-align: left;
+      border: 1px solid #e2e8f0;
+    }
+    .table-container th {
+      background: #f7fafc;
+      font-weight: 600;
+    }
+    .footer {
+      margin-top: 3rem;
+      padding-top: 1rem;
+      border-top: 1px solid #e2e8f0;
+      text-align: center;
+      color: #718096;
+      font-size: 0.875rem;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>lex Dataset Analysis</h1>
+    <div class="date">12/9/2025</div>
+  </div>
+  <div class="content">
+    
+      <section class="finding">
+        <h2>Create visualization/plot</h2>
+        <p class="finding-description">Using ggplot, geom_line, plot()</p>
+        <div class="code-section">
+          <h3>Analysis Code</h3>
+          <pre class="r-code"><code>library(dplyr)
+library(ggplot2)
+
+# Filter to 1900-2025 range and calculate increase for each country
+lex_filtered <- lex_long %>%
+  filter(year >= 1900 & year <= 2025)
+
+# Get life expectancy at start and end for each country
+life_exp_change <- lex_filtered %>%
+  filter(year %in% c(1900, 2025)) %>%
+  group_by(geo, name) %>%
+  filter(n() == 2) %>%  # Only countries with data for both years
+  summarize(
+    le_1900 = life_expectancy[year == 1900],
+    le_2025 = life_expectancy[year == 2025],
+    increase = le_2025 - le_1900,
+    .groups = "drop"
+  ) %>%
+  arrange(desc(increase))
+
+# Get top 5 countries
+top5 <- head(life_exp_change, 5)
+cat("Top 5 countries by life expectancy increase (1900-2025):\n")
+print(top5)
+
+# Create line plot for these countries
+lex_filtered %>%
+  filter(geo %in% top5$geo) %>%
+  ggplot(aes(x = year, y = life_expectancy, color = name)) +
+  geom_line(linewidth = 1) +
+  scale_x_continuous(limits = c(1900, 2025), breaks = seq(1900, 2025, 25)) +
+  theme_minimal() +
+  labs(
+    title = "Countries with Greatest Life Expectancy Increase (1900-2025)",
+    x = "Year",
+    y = "Life Expectancy (years)",
+    color = "Country"
+  ) +
+  theme(legend.position = "bottom")</code></pre>
+        </div>
+        <div class="plots-section">
+          <h3>Visualization</h3>
+          <div class="plot-container">
+            <img src="data:image/png;base64,[object Object]" alt="Plot 1" />
+          </div>
+        </div>
+        <div class="output-section">
+          <h3>Output</h3>
+          <pre class="text-output">Top 5 countries by life expectancy increase (1900-2025):
+# A tibble: 5 × 5
+  geo   name        le_1900 le_2025 increase
+  <chr> <chr>         <dbl>   <dbl>    <dbl>
+1 kor   South Korea    24.8    83.6     58.9
+2 bgd   Bangladesh     21.1    76.3     55.3
+3 irn   Iran           25.4    79.1     53.6
+4 prk   North Korea    20.4    73.9     53.6
+5 kwt   Kuwait         29.2    82.6     53.4
+null device 
+          1</pre>
+        </div>
+      </section>
+
+      <section class="finding">
+        <h2>Create visualization/plot</h2>
+        <p class="finding-description">Using ggplot, geom_line, plot()</p>
+        <div class="code-section">
+          <h3>Analysis Code</h3>
+          <pre class="r-code"><code>library(dplyr)
+library(ggplot2)
+
+# Get bottom 5 countries by life expectancy increase
+bottom5 <- life_exp_change %>%
+  arrange(increase) %>%
+  head(5)
+
+cat("Bottom 5 countries by life expectancy increase (1900-2025):\n")
+print(bottom5)
+
+# Create line plot for these countries
+lex_filtered %>%
+  filter(geo %in% bottom5$geo) %>%
+  ggplot(aes(x = year, y = life_expectancy, color = name)) +
+  geom_line(linewidth = 1) +
+  scale_x_continuous(limits = c(1900, 2025), breaks = seq(1900, 2025, 25)) +
+  theme_minimal() +
+  labs(
+    title = "Countries with Smallest Life Expectancy Increase (1900-2025)",
+    x = "Year",
+    y = "Life Expectancy (years)",
+    color = "Country"
+  ) +
+  theme(legend.position = "bottom")</code></pre>
+        </div>
+        <div class="plots-section">
+          <h3>Visualization</h3>
+          <div class="plot-container">
+            <img src="data:image/png;base64,[object Object]" alt="Plot 1" />
+          </div>
+        </div>
+        <div class="output-section">
+          <h3>Output</h3>
+          <pre class="text-output">Bottom 5 countries by life expectancy increase (1900-2025):
+# A tibble: 5 × 5
+  geo   name                     le_1900 le_2025 increase
+  <chr> <chr>                      <dbl>   <dbl>    <dbl>
+1 lso   Lesotho                     37.1    52.8     15.8
+2 caf   Central African Republic    34.8    53.6     18.8
+3 moz   Mozambique                  35.6    60.1     24.5
+4 som   Somalia                     33.9    59.9     26.0
+5 swz   Eswatini                    33.3    59.5     26.2
+null device 
+          1</pre>
+        </div>
+      </section>
+  </div>
+  <div class="footer">
+    Report generated by 3Panel Data Analyzer
+  </div>
+</body>
+</html>

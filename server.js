@@ -112,15 +112,16 @@ KEY RULES:
 
 CRITICAL - DATASET VARIABLE NAMING CONVENTION:
 When datasets are loaded via the load-data button, they follow a strict naming convention:
-- Variable name = filename without the .csv extension
+- Variable name = filename without the .csv extension, with ALL special characters (hyphens, spaces, dots, etc.) replaced by underscores
 - Example: "lex.csv" → variable is "lex"
 - Example: "population_data.csv" → variable is "population_data"
-- Example: "my_dataset.csv" → variable is "my_dataset"
+- Example: "my-dataset.csv" → variable is "my_dataset" (hyphen becomes underscore)
+- Example: "Nutrition__Physical_Activity__and_Obesity_-_Behavioral_Risk_Factor_Surveillance_System.csv" → variable is "Nutrition__Physical_Activity__and_Obesity___Behavioral_Risk_Factor_Surveillance_System"
 
 When the user asks you to work with a dataset:
 1. LOOK BACK in the conversation history for when the dataset was loaded
-2. FIND the filename (e.g., "lex.csv")
-3. REMOVE the .csv extension to get the variable name (e.g., "lex")
+2. FIND the filename (e.g., "lex.csv" or "my-data.csv")
+3. REMOVE the .csv extension and replace ALL special characters with underscores (e.g., "lex" or "my_data")
 4. USE that variable name in your code
 
 Example:
@@ -500,6 +501,85 @@ IMPORTANT: You can now SEE the plots that were generated! The user has included 
 
 When the user asks you to modify or improve a plot, you can see exactly what it looks like and make informed adjustments.`;
     }
+
+    // Add reactive components instructions to system prompt
+    systemPrompt += `
+
+INTERACTIVE REACTIVE COMPONENTS (Shiny-like interactivity):
+
+You can create interactive visualizations that users can control WITHOUT requiring new LLM requests!
+
+When appropriate (e.g., "create an interactive histogram" or "let me adjust the bin width"), output a reactive component spec in a JSON code block:
+
+\`\`\`json
+{
+  "type": "reactive-component",
+  "title": "Interactive Histogram",
+  "description": "Adjust bin width to explore the distribution",
+  "controls": [
+    {
+      "type": "slider",
+      "param": "binwidth",
+      "label": "Bin Width",
+      "min": 0.1,
+      "max": 5,
+      "step": 0.1,
+      "default": 1
+    }
+  ],
+  "rCode": "library(ggplot2); ggplot(mtcars, aes(x=mpg)) + geom_histogram(binwidth={{binwidth}}) + theme_minimal()",
+  "autoFormatTabular": false
+}
+\`\`\`
+
+CONTROL TYPES:
+- slider: {type: "slider", param: "name", min: 0, max: 100, step: 1, default: 50, label: "Label"}
+- select: {type: "select", param: "name", options: ["opt1", "opt2"], default: "opt1", label: "Label"}
+- checkbox: {type: "checkbox", param: "name", default: true, label: "Label"}
+- text: {type: "text", param: "name", default: "value", placeholder: "hint", label: "Label"}
+
+KEY POINTS:
+- Use {{param}} in rCode to insert control values (e.g., {{binwidth}})
+- The component will execute R code automatically when controls change
+- No LLM round trip needed - instant updates!
+- Use for: adjustable parameters, filtering, switching between views
+- Keep it simple: 1-3 controls is ideal
+
+EXAMPLE - Interactive Scatter Plot:
+\`\`\`json
+{
+  "type": "reactive-component",
+  "title": "Explore MPG vs Weight",
+  "controls": [
+    {
+      "type": "slider",
+      "param": "point_size",
+      "label": "Point Size",
+      "min": 1,
+      "max": 10,
+      "default": 3
+    },
+    {
+      "type": "select",
+      "param": "color_var",
+      "label": "Color By",
+      "options": ["cyl", "gear", "am"],
+      "default": "cyl"
+    }
+  ],
+  "rCode": "library(ggplot2); ggplot(mtcars, aes(x=wt, y=mpg, color=factor({{color_var}}))) + geom_point(size={{point_size}}) + theme_minimal() + labs(color={{color_var}})"
+}
+\`\`\`
+
+WHEN TO USE:
+- User asks for "interactive", "adjustable", or "let me control" features
+- Parameters that make sense to tweak (binwidth, alpha, colors, filtering thresholds)
+- Exploring different views of the same data
+
+WHEN NOT TO USE:
+- Simple static visualizations
+- One-time analyses
+- Complex multi-step workflows`;
 
     // Format messages with vision content blocks if plots are included
     let formattedMessages = messages;
@@ -1123,7 +1203,11 @@ app.post('/api/load-and-report-data', async (req, res) => {
     const anthropic = new Anthropic({ apiKey });
 
     // ==== PHASE 1: Use explicit diagnostic R code ====
-    const baseFilename = filename.replace(/\.csv$/i, ''); // Remove .csv extension
+    // Create a valid R variable name from the filename
+    // Remove .csv extension and sanitize for R (replace invalid chars with underscores)
+    let baseFilename = filename.replace(/\.csv$/i, ''); // Remove .csv extension
+    baseFilename = baseFilename.replace(/[^a-zA-Z0-9_]/g, '_'); // Replace invalid chars
+    baseFilename = baseFilename.replace(/^(\d)/, '_$1'); // Ensure it doesn't start with a number
 
     // Generate explicit diagnostic code instead of asking Claude
     const diagnosticCode = `# Suppress package startup messages
@@ -1326,7 +1410,8 @@ Write your comprehensive report in JSON format based on this actual output.`;
       output: rOutput.stdout,
       error: rOutput.stderr || null,
       suggestions: suggestions,
-      filename: filename
+      filename: filename,
+      variableName: baseFilename  // Add the sanitized R variable name
     });
 
   } catch (error) {
@@ -1358,6 +1443,260 @@ app.post('/api/clear-workspace', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// Create Quarto report endpoint with HTML fallback
+app.post('/api/create-quarto-report', async (req, res) => {
+  try {
+    const { title, date, findings, summary } = req.body;
+
+    if (!title || !findings) {
+      return res.status(400).json({ error: 'Missing required report data (title, findings)' });
+    }
+
+    // Create reports directory if it doesn't exist
+    const reportsDir = join(__dirname, 'reports');
+    await mkdir(reportsDir, { recursive: true });
+
+    // Generate filename with timestamp
+    const timestamp = Date.now();
+    const htmlFilename = `report_${timestamp}.html`;
+    const htmlPath = join(reportsDir, htmlFilename);
+
+    // Generate narrative HTML report with embedded images
+    console.log('📄 Generating narrative HTML report...');
+    console.log(`Number of findings: ${findings.length}`);
+    findings.forEach((finding, idx) => {
+      console.log(`Finding ${idx}: ${finding.title}`);
+      console.log(`  - Plots: ${finding.plots?.length || 0}`);
+      console.log(`  - Tables: ${finding.tables?.length || 0}`);
+      console.log(`  - Text output: ${finding.textOutput ? 'Yes' : 'No'}`);
+      if (finding.plots?.length > 0) {
+        console.log(`  - First plot type: ${typeof finding.plots[0]}`);
+        console.log(`  - First plot is array: ${Array.isArray(finding.plots[0])}`);
+        if (typeof finding.plots[0] === 'string') {
+          console.log(`  - String length: ${finding.plots[0].length}, starts with: ${finding.plots[0].substring(0, 50)}`);
+        } else {
+          console.log(`  - Not a string! Value: ${JSON.stringify(finding.plots[0]).substring(0, 200)}`);
+        }
+      }
+    });
+
+    // Generate findings sections
+    const findingsHTML = findings.map((finding, index) => {
+      let sectionHTML = `
+      <div class="finding">`;
+
+      // Add plots
+      if (finding.plots && finding.plots.length > 0) {
+        finding.plots.forEach((plot, plotIdx) => {
+          // Handle both object {type: "image", data: "..."} and plain string formats
+          const plotData = typeof plot === 'string' ? plot : (plot?.data || '');
+
+          // Extract title from ggplot SVG - the title is in a <text> element with specific positioning
+          // Look for text elements near the top of the chart (y coordinate around 19-25)
+          let plotTitle = null;
+
+          // Try to find the main title text element
+          const titleTextMatch = plotData.match(/<text[^>]*y=['"](?:19|20|21|22|23|24|25)['"'][^>]*>([^<]+)<\/text>/);
+          if (titleTextMatch && titleTextMatch[1] && !titleTextMatch[1].match(/^\d+$/)) {
+            const candidate = titleTextMatch[1].trim();
+            // Only use if it's not a generic or technical description
+            if (!candidate.includes('Visualization') && !candidate.includes('Plot Title') && !candidate.includes('ggplot')) {
+              plotTitle = candidate;
+            }
+          }
+
+          // Only show title if we found a real one from ggplot
+          if (plotTitle) {
+            sectionHTML += `
+        <h2 class="plot-title">${plotTitle}</h2>`;
+          }
+
+          sectionHTML += `
+        <div class="plot-container">
+          ${plotData}
+        </div>`;
+
+          // Always add descriptive paragraph after plot
+          if (finding.description) {
+            sectionHTML += `
+        <p class="plot-description">${finding.description}</p>`;
+          }
+        });
+      }
+
+      // Add tables if they exist (without heading)
+      if (finding.tables && finding.tables.length > 0) {
+        console.log(`Finding has ${finding.tables.length} tables`);
+        finding.tables.forEach((table, tableIdx) => {
+          console.log(`Table ${tableIdx}:`, typeof table, table?.type);
+          console.log(`Table ${tableIdx} full structure:`, JSON.stringify(table, null, 2));
+
+          // Handle different table formats
+          if (typeof table === 'object' && table !== null) {
+            if (table.type === 'html') {
+              // HTML widget table (gt, formattable, etc.) - embed as iframe
+              const widgetUrl = table.url || table.data;
+              console.log(`Rendering HTML widget table with URL: ${widgetUrl}`);
+              sectionHTML += `
+            <div class="table-container">
+              <iframe src="${widgetUrl}" style="width: 100%; min-height: 400px; border: none;"></iframe>
+            </div>`;
+            } else {
+              // Unknown object type
+              console.warn(`Unknown table object type:`, table);
+              sectionHTML += `
+            <div class="table-container">
+              <div class="error">Unknown table format: ${JSON.stringify(table)}</div>
+            </div>`;
+            }
+          } else if (typeof table === 'string') {
+            // Direct HTML string
+            console.log(`Rendering direct HTML table (${table.length} chars)`);
+            sectionHTML += `
+            <div class="table-container">
+              ${table}
+            </div>`;
+          } else {
+            console.warn(`Unexpected table type: ${typeof table}`, table);
+          }
+        });
+
+        // Add description after tables (similar to plots)
+        if (finding.description) {
+          sectionHTML += `
+        <p class="plot-description">${finding.description}</p>`;
+        }
+      }
+
+      sectionHTML += `
+      </div>`;
+
+      return sectionHTML;
+    }).join('\n');
+
+    const fullHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}</title>
+  <style>
+    html {
+      background: #edeff0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+      line-height: 1.7;
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 40px 60px;
+      color: #1a1a1a;
+      background: #ffffff;
+    }
+    h1 {
+      color: #000000;
+      margin: 0 0 8px 0;
+      font-size: 2rem;
+      font-weight: 600;
+      line-height: 1.3;
+    }
+    .date {
+      color: #6b6b6b;
+      font-size: 0.875rem;
+      padding-bottom: 16px;
+      border-bottom: 1px solid #e0e0e0;
+      margin-bottom: 24px;
+    }
+    .summary {
+      color: #4a4a4a;
+      font-size: 0.9375rem;
+      line-height: 1.6;
+      margin: 24px 0;
+    }
+    .finding {
+      margin-bottom: 48px;
+    }
+    .plot-title {
+      color: #000000;
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin: 32px 0 20px 0;
+    }
+    .plot-container {
+      margin: 20px 0;
+      padding: 20px;
+      background: #ffffff;
+      border: 1px solid #d0d0d0;
+      border-radius: 4px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .plot-container svg {
+      max-width: 100%;
+      height: auto;
+    }
+    .plot-description {
+      color: #4a4a4a;
+      font-size: 0.9375rem;
+      line-height: 1.6;
+      margin: 20px 0;
+    }
+    h3 {
+      color: #000000;
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-top: 32px;
+      margin-bottom: 16px;
+    }
+    .table-container {
+      margin: 20px 0;
+      overflow-x: auto;
+    }
+    .table-container table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+    .table-container th,
+    .table-container td {
+      padding: 0.5rem;
+      text-align: left;
+      border: 1px solid #e2e8f0;
+    }
+    .table-container th {
+      background: #f7fafc;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <h1>${title}</h1>
+  <div class="date">${date}</div>
+  ${summary ? `<div class="summary">${summary}</div>` : ''}
+  ${findingsHTML}
+</body>
+</html>`;
+
+    // Write HTML file
+    await writeFile(htmlPath, fullHTML, 'utf-8');
+
+    console.log(`✅ HTML report created: ${htmlFilename}`);
+
+    res.json({
+      success: true,
+      htmlPath: htmlPath,
+      htmlFilename: htmlFilename,
+      method: 'html-report'
+    });
+  } catch (error) {
+    console.error('Error creating report:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Serve reports directory
+app.use('/reports', express.static(join(__dirname, 'reports')));
 
 // Start server
 app.listen(PORT, () => {
