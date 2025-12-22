@@ -52,6 +52,24 @@ app.get('/health', (req, res) => {
 });
 
 /**
+ * Check if Quarto is installed and available
+ * @returns {Promise<boolean>} True if Quarto is available
+ */
+function checkQuartoAvailable() {
+  return new Promise((resolve) => {
+    exec('quarto --version', (error, stdout, stderr) => {
+      if (error) {
+        console.log('Quarto not available:', error.message);
+        resolve(false);
+      } else {
+        console.log('Quarto version:', stdout.trim());
+        resolve(true);
+      }
+    });
+  });
+}
+
+/**
  * POST /api/chat
  * Proxy endpoint for Claude API requests
  *
@@ -109,6 +127,55 @@ KEY RULES:
 3. BEFORE loading data, CHECK THE CONVERSATION HISTORY - if data was already loaded, DO NOT reload it
 4. Libraries (ggplot2, dplyr, etc.) DO NOT persist - always call library() when needed
 5. When analyzing data that was loaded earlier, just use the variable name directly
+
+CRITICAL - SNOWFLAKE DATABASE CONNECTIONS:
+A Snowflake helper file (snowflake_helper.R) is AUTOMATICALLY loaded with every R execution.
+This file provides robust connection functions with automatic server format detection.
+
+When the user asks to connect to Snowflake or query Snowflake data:
+1. ALWAYS use snowflake_connect() to establish connection (NEVER use direct dbConnect calls)
+2. The connection will try multiple server formats automatically and find the one that works
+3. Once connected, credentials persist in the workspace for the entire conversation
+
+AVAILABLE SNOWFLAKE FUNCTIONS (all pre-loaded and ready to use):
+- snowflake_connect()                    - Connect with automatic format detection (use this FIRST)
+- sf_databases()                         - List all available databases
+- sf_tables()                            - List tables in current database/schema context
+- sf_tables(database="DB")               - List ALL tables in a specific database (all schemas)
+- sf_tables(schema="SCH")                - List tables in specific schema of current database
+- sf_tables(database="DB", schema="SCH") - List tables in specific database.schema
+- sf_preview("TABLE_NAME")               - Preview first 10 rows of a table
+- sf_preview("TABLE_NAME", n=25)         - Preview first 25 rows
+- sf_use(database="DB")                  - Switch to a different database
+- sf_use(database="DB", schema="SCH")    - Switch database and schema
+- sf_use(warehouse="WH")                 - Switch warehouse
+- sf_query("SELECT * FROM ...")          - Execute any SQL query
+
+EXAMPLE USAGE:
+User: "Connect to Snowflake"
+You generate:
+\`\`\`r
+snowflake_connect()
+\`\`\`
+
+User: "Show me the databases"
+You generate:
+\`\`\`r
+sf_databases()
+\`\`\`
+
+User: "Query the customers table"
+You generate:
+\`\`\`r
+customers <- sf_query("SELECT * FROM CUSTOMERS LIMIT 100")
+head(customers)
+\`\`\`
+
+IMPORTANT NOTES:
+- NEVER try to connect using dbConnect() directly. ALWAYS use snowflake_connect()
+- Snowflake requires a warehouse to execute queries. The connection stores warehouse/database/schema context automatically
+- If you get a "No active warehouse" error, use sf_use(warehouse="WAREHOUSE_NAME") to set one
+- The helper automatically includes warehouse/database/schema in connections, so context persists across queries
 
 CRITICAL - DATASET VARIABLE NAMING CONVENTION:
 When datasets are loaded via the load-data button, they follow a strict naming convention:
@@ -759,6 +826,11 @@ if (file.exists("${workspacePath.replace(/\\/g, '/')}")) {
 # Load mtcars dataset
 data(mtcars)
 
+# Source Snowflake helper if it exists
+if (file.exists("snowflake_helper.R")) {
+  suppressMessages(source("snowflake_helper.R"))
+}
+
 # Auto-load commonly used packages
 suppressPackageStartupMessages({
   library(dplyr)
@@ -810,6 +882,11 @@ if (file.exists("${workspacePath.replace(/\\/g, '/')}")) {
 
 # Load mtcars dataset
 data(mtcars)
+
+# Source Snowflake helper if it exists
+if (file.exists("snowflake_helper.R")) {
+  suppressMessages(source("snowflake_helper.R"))
+}
 
 # Auto-load commonly used packages
 suppressPackageStartupMessages({
@@ -1444,6 +1521,124 @@ app.post('/api/clear-workspace', async (req, res) => {
   }
 });
 
+/**
+ * Generate a report using Quarto
+ * @param {string} reportsDir - Directory to save the report
+ * @param {number} timestamp - Timestamp for filename
+ * @param {string} title - Report title
+ * @param {string} date - Report date
+ * @param {Array} findings - Array of findings with plots/tables
+ * @param {string} summary - Report summary
+ * @returns {Promise<Object>} Object with htmlPath and htmlFilename
+ */
+async function generateQuartoReport(reportsDir, timestamp, title, date, findings, summary) {
+  const qmdFilename = `report_${timestamp}.qmd`;
+  const qmdPath = join(reportsDir, qmdFilename);
+  const htmlFilename = `report_${timestamp}.html`;
+  const htmlPath = join(reportsDir, htmlFilename);
+
+  // Build Quarto markdown content
+  let qmdContent = `---
+title: "${title}"
+date: "${date}"
+format:
+  html:
+    theme: default
+    toc: false
+    embed-resources: true
+---
+
+`;
+
+  // Add summary if provided
+  if (summary) {
+    qmdContent += `${summary}\n\n`;
+  }
+
+  // Add each finding
+  for (let index = 0; index < findings.length; index++) {
+    const finding = findings[index];
+
+    // Add plots
+    if (finding.plots && finding.plots.length > 0) {
+      for (let plotIdx = 0; plotIdx < finding.plots.length; plotIdx++) {
+        const plot = finding.plots[plotIdx];
+        // Handle both object {type: "image", data: "..."} and plain string formats
+        const plotData = typeof plot === 'string' ? plot : (plot?.data || '');
+
+        // Save SVG plot to a file
+        const plotFilename = `plot_${timestamp}_${index}_${plotIdx}.svg`;
+        const plotPath = join(reportsDir, plotFilename);
+
+        // Write the SVG file (using async writeFile from fs/promises)
+        await writeFile(plotPath, plotData, 'utf-8');
+
+        // Extract title from SVG if available
+        const titleTextMatch = plotData.match(/<text[^>]*y=['"](?:19|20|21|22|23|24|25)['"'][^>]*>([^<]+)<\/text>/);
+        let plotTitle = null;
+        if (titleTextMatch && titleTextMatch[1] && !titleTextMatch[1].match(/^\d+$/)) {
+          const candidate = titleTextMatch[1].trim();
+          if (!candidate.includes('Visualization') && !candidate.includes('Plot Title') && !candidate.includes('ggplot')) {
+            plotTitle = candidate;
+          }
+        }
+
+        // Add title if found
+        if (plotTitle) {
+          qmdContent += `## ${plotTitle}\n\n`;
+        }
+
+        // Reference the plot file
+        qmdContent += `![](${plotFilename})\n\n`;
+
+        // Add description
+        if (finding.description) {
+          qmdContent += `${finding.description}\n\n`;
+        }
+      }
+    }
+
+    // Add tables
+    if (finding.tables && finding.tables.length > 0) {
+      for (const table of finding.tables) {
+        if (typeof table === 'object' && table !== null) {
+          if (table.type === 'html') {
+            // For HTML widgets, we'll need to handle differently
+            // For now, just note that it's a table
+            qmdContent += `*Interactive table available in HTML version*\n\n`;
+          }
+        } else if (typeof table === 'string') {
+          // Direct HTML table - include it in a raw HTML block
+          qmdContent += `\`\`\`{=html}\n${table}\n\`\`\`\n\n`;
+        }
+      }
+
+      // Add description after tables
+      if (finding.description) {
+        qmdContent += `${finding.description}\n\n`;
+      }
+    }
+  }
+
+  // Write the .qmd file
+  await writeFile(qmdPath, qmdContent, 'utf-8');
+  console.log(`✅ Created Quarto file: ${qmdFilename}`);
+
+  // Render with Quarto
+  return new Promise((resolve, reject) => {
+    exec(`quarto render "${qmdPath}"`, { cwd: reportsDir }, (error, stdout, stderr) => {
+      if (error) {
+        console.error('Quarto render error:', stderr);
+        reject(new Error(`Quarto render failed: ${error.message}`));
+        return;
+      }
+
+      console.log(`✅ Quarto report rendered: ${htmlFilename}`);
+      resolve({ htmlPath, htmlFilename });
+    });
+  });
+}
+
 // Create Quarto report endpoint with HTML fallback
 app.post('/api/create-quarto-report', async (req, res) => {
   try {
@@ -1461,6 +1656,28 @@ app.post('/api/create-quarto-report', async (req, res) => {
     const timestamp = Date.now();
     const htmlFilename = `report_${timestamp}.html`;
     const htmlPath = join(reportsDir, htmlFilename);
+
+    // Check if Quarto is available
+    const hasQuarto = await checkQuartoAvailable();
+
+    if (hasQuarto) {
+      // Try to generate report using Quarto
+      try {
+        console.log('📊 Generating report with Quarto...');
+        const quartoResult = await generateQuartoReport(reportsDir, timestamp, title, date, findings, summary);
+        return res.json({
+          success: true,
+          htmlPath: quartoResult.htmlPath,
+          htmlFilename: quartoResult.htmlFilename,
+          method: 'quarto'
+        });
+      } catch (quartoError) {
+        console.warn('⚠️ Quarto generation failed, falling back to HTML:', quartoError.message);
+        // Fall through to HTML generation
+      }
+    } else {
+      console.log('ℹ️ Quarto not available, using HTML generation');
+    }
 
     // Generate narrative HTML report with embedded images
     console.log('📄 Generating narrative HTML report...');
@@ -1687,7 +1904,7 @@ app.post('/api/create-quarto-report', async (req, res) => {
       success: true,
       htmlPath: htmlPath,
       htmlFilename: htmlFilename,
-      method: 'html-report'
+      method: 'html'
     });
   } catch (error) {
     console.error('Error creating report:', error);

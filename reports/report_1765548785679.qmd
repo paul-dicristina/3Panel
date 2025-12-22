@@ -1,0 +1,20 @@
+---
+title: "lex Dataset Analysis"
+date: "12/12/2025"
+format:
+  html:
+    theme: default
+    toc: false
+    embed-resources: true
+---
+
+This report presents 2 key findings from an analysis of lex. The analysis addressed 4 questions focused on exploring patterns, relationships, and insights within the data.
+
+![](plot_1765548785679_0_0.svg)
+
+This line chart tracks life expectancy trends for the ten countries that experienced the greatest improvements between 1990 and 2025. Ethiopia leads with a remarkable 23.8-year increase, followed by Rwanda and Eritrea, with most of these high-gain countries located in Sub-Saharan Africa and showing dramatic upward trajectories from relatively low starting points in 1990.
+
+![](plot_1765548785679_1_0.svg)
+
+This visualization highlights the ten countries with the smallest life expectancy gains—or actual declines—between 1990 and 2025. Most strikingly, Lesotho, Eswatini, and Zimbabwe experienced decreases in life expectancy (likely due to the HIV/AIDS epidemic), while several other countries in this group showed only marginal improvements of less than 2.5 years over the 35-year period.
+

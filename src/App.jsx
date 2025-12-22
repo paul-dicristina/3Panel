@@ -49,6 +49,7 @@ function App() {
   const [favoritedCardIds, setFavoritedCardIds] = useState(new Set());
   const [isSubmitAnimating, setIsSubmitAnimating] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
 
   // Refs for resizable panels
   const splitInstanceRef = useRef(null);
@@ -65,6 +66,7 @@ function App() {
   const submitButtonRef = useRef(null);
   const shouldAutoSubmitRef = useRef(false);
   const isButtonPressedRef = useRef(false);
+  const slashMenuRef = useRef(null);
 
   // Helper function to determine suggestion icon based on content
   const getSuggestionIcon = (suggestion) => {
@@ -162,6 +164,20 @@ function App() {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [showOptionsMenu]);
+
+  // Close slash menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showSlashMenu && slashMenuRef.current && !slashMenuRef.current.contains(event.target)) {
+        setShowSlashMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showSlashMenu]);
 
   // Initialize Split.js for resizable panels
   useEffect(() => {
@@ -722,6 +738,41 @@ Please respond with a JSON object in this format:
     if (textareaRef.current) {
       textareaRef.current.focus();
     }
+  };
+
+  // Handle input change - detect slash commands
+  const handleInputChange = (e) => {
+    const value = e.target.value;
+    setInputValue(value);
+
+    // Show slash menu when input starts with "/"
+    if (value === '/') {
+      setShowSlashMenu(true);
+    } else {
+      setShowSlashMenu(false);
+    }
+  };
+
+  // Handle slash command: show loaded datasets
+  const handleShowLoadedDatasets = () => {
+    setShowSlashMenu(false);
+    setInputValue('');
+
+    // TODO: Get list of loaded datasets from R workspace
+    // For now, show a placeholder message
+    const message = {
+      id: Date.now(),
+      role: 'assistant',
+      content: 'Loaded datasets: (feature coming soon)'
+    };
+    setMessages(prev => [...prev, message]);
+  };
+
+  // Handle slash command: open dataset
+  const handleOpenDataset = () => {
+    setShowSlashMenu(false);
+    setInputValue('');
+    handleLoadData();
   };
 
   // Initialize speech recognition
@@ -1462,14 +1513,35 @@ Please respond with a JSON object in this format:
               <textarea
                 ref={textareaRef}
                 value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
+                onChange={handleInputChange}
                 onKeyPress={handleKeyPress}
-                placeholder="Ask Positronic..."
+                placeholder="Ask Positronic... Type / to see commands"
                 className="w-full pl-11 pr-12 py-2 border border-[#616161] rounded-lg focus:outline-none resize-none bg-white overflow-hidden"
                 style={{ fontSize: '11pt', minHeight: 'calc(2.5rem + 1px)' }}
                 rows="1"
                 disabled={isLoading}
               />
+
+              {/* Slash command menu */}
+              {showSlashMenu && (
+                <div
+                  ref={slashMenuRef}
+                  className="absolute bottom-full left-0 mb-2 bg-white border border-gray-300 rounded-lg shadow-lg min-w-[250px] z-50 py-1"
+                >
+                  <button
+                    className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
+                    onClick={handleShowLoadedDatasets}
+                  >
+                    /loaded datasets
+                  </button>
+                  <button
+                    className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
+                    onClick={handleOpenDataset}
+                  >
+                    /open dataset...
+                  </button>
+                </div>
+              )}
               <button
                 onMouseDown={handleVoicePress}
                 onMouseUp={handleVoiceRelease}

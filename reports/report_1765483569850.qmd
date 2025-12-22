@@ -1,0 +1,20 @@
+---
+title: "lex Dataset Analysis"
+date: "12/11/2025"
+format:
+  html:
+    theme: default
+    toc: false
+    embed-resources: true
+---
+
+This report presents 2 key findings from an analysis of lex. The analysis addressed 3 questions focused on exploring patterns, relationships, and insights within the data.
+
+*Interactive table available in HTML version*
+
+The life expectancy dataset has been transformed from wide format to long format, resulting in 58,394 observations across 4 variables: country code, country name, year, and life expectancy. The data spans from 1800 onwards, with early records showing Afghanistan's life expectancy around 28 years in the early 19th century.
+
+![](plot_1765483569850_1_0.svg)
+
+This visualization tracks life expectancy trends for the five countries that achieved the greatest improvements between 1910 and 2025. South Korea leads with a remarkable 60.7-year gain (from 22.9 to 83.6 years), followed by North Korea, Bangladesh, Iran, and Kuwait, all showing dramatic upward trajectories particularly accelerating after mid-century, reflecting major advances in healthcare, nutrition, and living standards across these diverse nations.
+
