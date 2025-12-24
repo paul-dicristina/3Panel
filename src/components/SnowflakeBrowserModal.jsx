@@ -336,8 +336,8 @@ tryCatch({
     return (
       <div key={node.id}>
         <div
-          className={`flex items-center py-1 px-2 cursor-pointer hover:bg-gray-100 ${
-            isSelected ? 'bg-blue-400 text-white' : ''
+          className={`flex items-center py-1 px-2 cursor-pointer ${
+            isSelected ? 'bg-[#29b5e8] text-white' : 'hover:bg-gray-100'
           }`}
           style={{ paddingLeft: `${level * 20 + 8}px` }}
           onClick={(e) => {
@@ -361,7 +361,12 @@ tryCatch({
           )}
           {!carat && <span className="w-3 mr-2"></span>}
 
-          <img src={icon} alt="" className="w-4 h-4 mr-2" />
+          <img
+            src={icon}
+            alt=""
+            className="w-4 h-4 mr-2"
+            style={isSelected ? { filter: 'brightness(0) invert(1)' } : {}}
+          />
 
           <span className="flex-1">{node.name}</span>
 
@@ -385,41 +390,56 @@ tryCatch({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-[800px] max-h-[600px] flex flex-col">
+      <div className="bg-[#ecf2f4] rounded-lg shadow-xl w-[800px] h-[600px] flex flex-col">
         {/* Header */}
-        <div className="p-4 border-b flex items-center">
+        <div className="p-4 flex items-center flex-shrink-0">
           <img src="/snowflake-logo-color-rgb.svg" alt="Snowflake" className="h-8" />
         </div>
 
         {/* Tree View */}
-        <div className="flex-1 overflow-auto p-4 min-h-[400px]">
-          {isLoading && (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-gray-500">Loading databases...</div>
-            </div>
-          )}
+        <div className="flex-1 min-h-0 p-4 flex flex-col">
+          <div className="bg-white border border-gray-300 rounded flex-1 min-h-0 overflow-auto relative">
+            {isLoading && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <style>{`
+                  @keyframes snowflake-pulse {
+                    0%, 100% { transform: scale(1); }
+                    50% { transform: scale(1.15); }
+                  }
+                `}</style>
+                <img
+                  src="/snowflake-bug-color-rgb.svg"
+                  alt="Loading..."
+                  className="h-10"
+                  style={{
+                    animation: 'snowflake-pulse 1.5s ease-in-out infinite'
+                  }}
+                />
+              </div>
+            )}
 
-          {error && (
-            <div className="text-red-600 p-4">
-              Error: {error}
-            </div>
-          )}
+            {error && (
+              <div className="text-red-600 p-4">
+                Error: {error}
+              </div>
+            )}
 
-          {!isLoading && !error && treeData.length > 0 && (
-            <div className="border border-gray-300 rounded">
-              {treeData.map(node => renderNode(node))}
-            </div>
-          )}
+            {!isLoading && !error && treeData.length > 0 && (
+              <>
+                {treeData.map(node => renderNode(node))}
+              </>
+            )}
 
-          {!isLoading && !error && treeData.length === 0 && (
-            <div className="text-gray-500 text-center">
-              No databases found
-            </div>
-          )}
+            {!isLoading && !error && treeData.length === 0 && (
+              <div className="text-gray-500 text-center p-4">
+                No databases found
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t flex items-center justify-between">
+        <div className="p-4 flex items-center justify-between flex-shrink-0">
           <div className="text-sm text-gray-600">
             <div>{selectedItems.length} item{selectedItems.length !== 1 ? 's' : ''} selected</div>
             <div className="text-xs text-gray-500 mt-1">
@@ -430,7 +450,7 @@ tryCatch({
           <div className="flex gap-2">
             <button
               onClick={onClose}
-              className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100"
+              className="px-4 py-2 bg-white border border-gray-300 rounded hover:bg-gray-100"
             >
               Cancel
             </button>
