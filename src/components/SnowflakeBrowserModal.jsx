@@ -368,10 +368,10 @@ tryCatch({
             style={isSelected ? { filter: 'brightness(0) invert(1)' } : {}}
           />
 
-          <span className="flex-1">{node.name}</span>
+          <span className="flex-1" style={{ fontSize: '11pt' }}>{node.name}</span>
 
           {node.rows !== undefined && (
-            <span className={`text-sm ${isSelected ? 'text-white' : 'text-gray-500'}`}>
+            <span className={`text-sm ${isSelected ? 'text-white' : 'text-gray-500'}`} style={{ fontSize: '11pt' }}>
               {Number(node.rows).toLocaleString()} rows
             </span>
           )}
@@ -390,14 +390,14 @@ tryCatch({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-[#ecf2f4] rounded-lg shadow-xl w-[800px] h-[600px] flex flex-col">
+      <div className="bg-[#ecf2f4] rounded-lg shadow-xl w-[960px] h-[720px] flex flex-col">
         {/* Header */}
         <div className="p-4 flex items-center flex-shrink-0">
           <img src="/snowflake-logo-color-rgb.svg" alt="Snowflake" className="h-8" />
         </div>
 
         {/* Tree View */}
-        <div className="flex-1 min-h-0 p-4 flex flex-col">
+        <div className="flex-1 min-h-0 px-4 py-2 flex flex-col">
           <div className="bg-white border border-gray-300 rounded flex-1 min-h-0 overflow-auto relative">
             {isLoading && (
               <div className="absolute inset-0 flex items-center justify-center">
