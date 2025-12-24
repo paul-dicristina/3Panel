@@ -151,10 +151,13 @@ tryCatch({
           code: `
 library(jsonlite)
 
-tryCatch({
-  all_items <- list()
+all_items <- list()
 
-  # Get tables
+# Query all object types with individual error handling
+# Each query wrapped in tryCatch so failures don't stop other queries
+
+# 1. Get regular tables
+tryCatch({
   tables_result <- sf_query("SHOW TABLES IN ${database}.${schema}")
   cat("Tables query returned ", nrow(tables_result), " rows\\n")
 
@@ -167,8 +170,12 @@ tryCatch({
       )
     }
   }
+}, error = function(e) {
+  cat("Tables query error: ", e$message, "\\n")
+})
 
-  # Get views
+# 2. Get views
+tryCatch({
   views_result <- sf_query("SHOW VIEWS IN ${database}.${schema}")
   cat("Views query returned ", nrow(views_result), " rows\\n")
 
@@ -181,19 +188,244 @@ tryCatch({
       )
     }
   }
-
-  cat(toJSON(all_items, auto_unbox = TRUE))
 }, error = function(e) {
-  cat("Error: ", e$message, "\\n")
-  cat("[]")
+  cat("Views query error: ", e$message, "\\n")
 })
+
+# 3. Get materialized views
+tryCatch({
+  mviews_result <- sf_query("SHOW MATERIALIZED VIEWS IN ${database}.${schema}")
+  cat("Materialized views query returned ", nrow(mviews_result), " rows\\n")
+
+  if (nrow(mviews_result) > 0) {
+    for (i in 1:nrow(mviews_result)) {
+      all_items[[length(all_items) + 1]] <- list(
+        name = as.character(mviews_result$name[i]),
+        type = "MATERIALIZED_VIEW",
+        rows = ifelse(is.na(mviews_result$rows[i]), 0, as.numeric(mviews_result$rows[i]))
+      )
+    }
+  }
+}, error = function(e) {
+  cat("Materialized views query error: ", e$message, "\\n")
+})
+
+# 4. Get external tables
+tryCatch({
+  ext_tables_result <- sf_query("SHOW EXTERNAL TABLES IN ${database}.${schema}")
+  cat("External tables query returned ", nrow(ext_tables_result), " rows\\n")
+
+  if (nrow(ext_tables_result) > 0) {
+    for (i in 1:nrow(ext_tables_result)) {
+      all_items[[length(all_items) + 1]] <- list(
+        name = as.character(ext_tables_result$name[i]),
+        type = "EXTERNAL_TABLE",
+        rows = ifelse(is.na(ext_tables_result$rows[i]), 0, as.numeric(ext_tables_result$rows[i]))
+      )
+    }
+  }
+}, error = function(e) {
+  cat("External tables query error: ", e$message, "\\n")
+})
+
+# 5. Get dynamic tables
+tryCatch({
+  dyn_tables_result <- sf_query("SHOW DYNAMIC TABLES IN ${database}.${schema}")
+  cat("Dynamic tables query returned ", nrow(dyn_tables_result), " rows\\n")
+
+  if (nrow(dyn_tables_result) > 0) {
+    for (i in 1:nrow(dyn_tables_result)) {
+      all_items[[length(all_items) + 1]] <- list(
+        name = as.character(dyn_tables_result$name[i]),
+        type = "DYNAMIC_TABLE",
+        rows = ifelse(is.na(dyn_tables_result$rows[i]), 0, as.numeric(dyn_tables_result$rows[i]))
+      )
+    }
+  }
+}, error = function(e) {
+  cat("Dynamic tables query error: ", e$message, "\\n")
+})
+
+# 6. Get streams (change data capture objects)
+tryCatch({
+  streams_result <- sf_query("SHOW STREAMS IN ${database}.${schema}")
+  cat("Streams query returned ", nrow(streams_result), " rows\\n")
+
+  if (nrow(streams_result) > 0) {
+    for (i in 1:nrow(streams_result)) {
+      all_items[[length(all_items) + 1]] <- list(
+        name = as.character(streams_result$name[i]),
+        type = "STREAM",
+        rows = 0  # Streams don't have row counts
+      )
+    }
+  }
+}, error = function(e) {
+  cat("Streams query error: ", e$message, "\\n")
+})
+
+# 7. Try to get semantic models (Snowflake Horizon feature)
+tryCatch({
+  semantic_result <- sf_query("SHOW SEMANTIC MODELS IN ${database}.${schema}")
+  cat("Semantic models query returned ", nrow(semantic_result), " rows\\n")
+
+  if (nrow(semantic_result) > 0) {
+    for (i in 1:nrow(semantic_result)) {
+      all_items[[length(all_items) + 1]] <- list(
+        name = as.character(semantic_result$name[i]),
+        type = "SEMANTIC_MODEL",
+        rows = 0
+      )
+    }
+  }
+}, error = function(e) {
+  cat("Semantic models query error (may not be available): ", e$message, "\\n")
+})
+
+# 7b. Try to get cortex analyst semantic models (alternative command)
+tryCatch({
+  semantic_views_result <- sf_query("SHOW CORTEX ANALYST SEMANTIC MODELS IN ${database}.${schema}")
+  cat("Cortex analyst semantic models query returned ", nrow(semantic_views_result), " rows\\n")
+
+  if (nrow(semantic_views_result) > 0) {
+    for (i in 1:nrow(semantic_views_result)) {
+      item_name <- as.character(semantic_views_result$name[i])
+      # Check if not already added
+      existing_names <- sapply(all_items, function(x) x$name)
+      if (!(item_name %in% existing_names)) {
+        all_items[[length(all_items) + 1]] <- list(
+          name = item_name,
+          type = "SEMANTIC_MODEL",
+          rows = 0
+        )
+      }
+    }
+  }
+}, error = function(e) {
+  cat("Cortex analyst semantic models query error (may not be available): ", e$message, "\\n")
+})
+
+# 8. Try alternate query for objects using information_schema
+# This catches any objects that might be missed by SHOW commands
+tryCatch({
+  info_query <- paste0(
+    "SELECT table_name, table_type, row_count ",
+    "FROM ${database}.information_schema.tables ",
+    "WHERE table_schema = '${schema}' ",
+    "ORDER BY table_name"
+  )
+  cat("Executing info_schema query: ", info_query, "\\n")
+  info_result <- sf_query(info_query)
+  cat("Information schema query returned ", nrow(info_result), " rows\\n")
+
+  # Debug: print what table types we found
+  if (nrow(info_result) > 0) {
+    unique_types <- unique(info_result$table_type)
+    cat("Table types found in info_schema: ", paste(unique_types, collapse=", "), "\\n")
+  }
+
+  if (nrow(info_result) > 0) {
+    # Only add items not already in the list
+    existing_names <- sapply(all_items, function(x) x$name)
+
+    for (i in 1:nrow(info_result)) {
+      item_name <- as.character(info_result$table_name[i])
+      if (!(item_name %in% existing_names)) {
+        item_type <- toupper(as.character(info_result$table_type[i]))
+
+        # Normalize type names
+        if (item_type == "BASE TABLE") {
+          item_type <- "TABLE"
+        } else if (item_type == "SEMANTIC MODEL" || item_type == "SEMANTIC_MODEL") {
+          item_type <- "SEMANTIC_MODEL"
+        } else if (grepl("SEMANTIC", item_type, ignore.case = TRUE)) {
+          # Catch any semantic-related types
+          item_type <- "SEMANTIC_MODEL"
+          cat("Found semantic type: ", as.character(info_result$table_type[i]), " -> SEMANTIC_MODEL\\n")
+        }
+
+        all_items[[length(all_items) + 1]] <- list(
+          name = item_name,
+          type = item_type,
+          rows = ifelse(is.na(info_result$row_count[i]), 0, as.numeric(info_result$row_count[i]))
+        )
+        cat("Added from info_schema: ", item_name, " (", item_type, ")\\n")
+      }
+    }
+  }
+}, error = function(e) {
+  cat("Information schema query error: ", e$message, "\\n")
+})
+
+# 9. Final safety net: Try SHOW OBJECTS to catch everything
+tryCatch({
+  objects_result <- sf_query("SHOW OBJECTS IN ${database}.${schema}")
+  cat("Show objects query returned ", nrow(objects_result), " rows\\n")
+
+  if (nrow(objects_result) > 0) {
+    # Filter to only table-like objects (not procedures, functions, etc.)
+    table_like_types <- c("TABLE", "VIEW", "MATERIALIZED VIEW", "EXTERNAL TABLE",
+                          "DYNAMIC TABLE", "STREAM", "SEMANTIC MODEL")
+
+    existing_names <- sapply(all_items, function(x) x$name)
+
+    for (i in 1:nrow(objects_result)) {
+      item_name <- as.character(objects_result$name[i])
+      # Get the kind column which contains the object type
+      if ("kind" %in% names(objects_result)) {
+        item_kind <- toupper(as.character(objects_result$kind[i]))
+      } else {
+        next  # Skip if no kind column
+      }
+
+      # Only process table-like objects we haven't already added
+      if (item_kind %in% table_like_types && !(item_name %in% existing_names)) {
+        # Normalize the type
+        normalized_type <- gsub(" ", "_", item_kind)
+
+        all_items[[length(all_items) + 1]] <- list(
+          name = item_name,
+          type = normalized_type,
+          rows = 0
+        )
+        cat("Added from SHOW OBJECTS: ", item_name, " (", normalized_type, ")\\n")
+      }
+    }
+  }
+}, error = function(e) {
+  cat("Show objects query error: ", e$message, "\\n")
+})
+
+cat("\\nTotal items found: ", length(all_items), "\\n")
+if (length(all_items) > 0) {
+  cat("Items by type:\\n")
+  types <- sapply(all_items, function(x) x$type)
+  type_counts <- table(types)
+  for (t in names(type_counts)) {
+    cat("  ", t, ": ", type_counts[t], "\\n")
+  }
+}
+cat("\\n")
+cat(toJSON(all_items, auto_unbox = TRUE))
 `,
           autoFormatTabular: false
         })
       });
 
       const result = await response.json();
-      console.log('Tables result for', database, '.', schema, ':', result);
+      console.log('========================================');
+      console.log(`Loading objects for ${database}.${schema}`);
+      console.log('========================================');
+
+      // Log the full R output for debugging
+      if (result.output) {
+        console.log('R Output:');
+        console.log(result.output);
+      }
+
+      if (result.error) {
+        console.error('R Errors:', result.error);
+      }
 
       // Extract JSON from output - find the JSON array
       let items = [];
@@ -205,13 +437,22 @@ tryCatch({
           console.log('Tables JSON found: Yes');
           try {
             items = JSON.parse(jsonMatch[0]);
-            console.log('Parsed items:', items);
+            console.log(`Successfully parsed ${items.length} items`);
+            console.log('Items:', items);
+
+            // Log type breakdown
+            const typeCounts = {};
+            items.forEach(item => {
+              typeCounts[item.type] = (typeCounts[item.type] || 0) + 1;
+            });
+            console.log('Type breakdown:', typeCounts);
           } catch (e) {
             console.error('JSON parse error:', e);
             return [];
           }
         } else {
           console.log('Tables JSON found: No');
+          console.log('Output does not contain JSON array');
           return [];
         }
       }
@@ -287,7 +528,9 @@ tryCatch({
   };
 
   const toggleSelection = (item, event) => {
-    if (item.type !== 'table' && item.type !== 'view') return;
+    // Allow selection of all queryable objects
+    const selectableTypes = ['table', 'view', 'materialized_view', 'external_table', 'dynamic_table', 'stream', 'semantic_model'];
+    if (!selectableTypes.includes(item.type)) return;
 
     const isMultiSelect = event.shiftKey || event.ctrlKey || event.metaKey;
 
@@ -316,17 +559,21 @@ tryCatch({
   const renderNode = (node, level = 0) => {
     const isExpanded = expandedNodes.has(node.id);
     const isSelected = selectedItems.some(item => item.id === node.id);
-    const isSelectable = node.type === 'table' || node.type === 'view';
+    const selectableTypes = ['table', 'view', 'materialized_view', 'external_table', 'dynamic_table', 'stream', 'semantic_model'];
+    const isSelectable = selectableTypes.includes(node.type);
 
     let icon;
     if (node.type === 'database') {
       icon = '/sf_db.png';
     } else if (node.type === 'schema') {
       icon = '/sf_schema.png';
-    } else if (node.type === 'table') {
+    } else if (node.type === 'table' || node.type === 'external_table' || node.type === 'dynamic_table') {
       icon = '/sf_table.png';
-    } else if (node.type === 'view') {
+    } else if (node.type === 'view' || node.type === 'materialized_view' || node.type === 'stream' || node.type === 'semantic_model') {
       icon = '/sf_view.png';
+    } else {
+      // Default icon for unknown types
+      icon = '/sf_table.png';
     }
 
     const carat = (node.type === 'database' || node.type === 'schema')
