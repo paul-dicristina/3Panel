@@ -6,11 +6,16 @@ const SnowflakeBrowserModal = ({ isOpen, onClose, onLoad }) => {
   const [expandedNodes, setExpandedNodes] = useState(new Set());
   const [selectedItems, setSelectedItems] = useState([]);
   const [error, setError] = useState(null);
+  const [loadingNodeId, setLoadingNodeId] = useState(null);
 
   // Load databases when modal opens
   useEffect(() => {
     if (isOpen) {
       loadDatabases();
+      setLoadingNodeId(null);
+    } else {
+      // Clear loading state when modal closes
+      setLoadingNodeId(null);
     }
   }, [isOpen]);
 
@@ -485,46 +490,51 @@ cat(toJSON(all_items, auto_unbox = TRUE))
       // Collapse
       console.log('Collapsing node:', node.id);
       newExpanded.delete(node.id);
+      setExpandedNodes(newExpanded);
     } else {
       // Expand
       console.log('Expanding node:', node.id);
       newExpanded.add(node.id);
+      setExpandedNodes(newExpanded);
 
       // Load children if not loaded
       if (!node.isLoaded) {
         console.log('Loading children for', node.type);
+        setLoadingNodeId(node.id);
 
-        if (node.type === 'database') {
-          const schemas = await loadSchemas(node.name);
-          console.log('Loaded', schemas.length, 'schemas');
-          setTreeData(prev => prev.map(db =>
-            db.id === node.id
-              ? { ...db, children: schemas, isLoaded: true }
-              : db
-          ));
-        } else if (node.type === 'schema') {
-          const tables = await loadTables(node.database, node.name);
-          console.log('Loaded', tables.length, 'tables/views');
-          setTreeData(prev => prev.map(db => {
-            if (db.id === `db-${node.database}`) {
-              return {
-                ...db,
-                children: db.children.map(schema =>
-                  schema.id === node.id
-                    ? { ...schema, children: tables, isLoaded: true }
-                    : schema
-                )
-              };
-            }
-            return db;
-          }));
+        try {
+          if (node.type === 'database') {
+            const schemas = await loadSchemas(node.name);
+            console.log('Loaded', schemas.length, 'schemas');
+            setTreeData(prev => prev.map(db =>
+              db.id === node.id
+                ? { ...db, children: schemas, isLoaded: true }
+                : db
+            ));
+          } else if (node.type === 'schema') {
+            const tables = await loadTables(node.database, node.name);
+            console.log('Loaded', tables.length, 'tables/views');
+            setTreeData(prev => prev.map(db => {
+              if (db.id === `db-${node.database}`) {
+                return {
+                  ...db,
+                  children: db.children.map(schema =>
+                    schema.id === node.id
+                      ? { ...schema, children: tables, isLoaded: true }
+                      : schema
+                  )
+                };
+              }
+              return db;
+            }));
+          }
+        } finally {
+          setLoadingNodeId(null);
         }
       } else {
         console.log('Node already loaded, just expanding');
       }
     }
-
-    setExpandedNodes(newExpanded);
   };
 
   const toggleSelection = (item, event) => {
@@ -559,6 +569,7 @@ cat(toJSON(all_items, auto_unbox = TRUE))
   const renderNode = (node, level = 0) => {
     const isExpanded = expandedNodes.has(node.id);
     const isSelected = selectedItems.some(item => item.id === node.id);
+    const isNodeLoading = loadingNodeId === node.id;
     const selectableTypes = ['table', 'view', 'materialized_view', 'external_table', 'dynamic_table', 'stream', 'semantic_model'];
     const isSelectable = selectableTypes.includes(node.type);
 
@@ -576,7 +587,8 @@ cat(toJSON(all_items, auto_unbox = TRUE))
       icon = '/sf_table.png';
     }
 
-    const carat = (node.type === 'database' || node.type === 'schema')
+    const hasCaratSlot = node.type === 'database' || node.type === 'schema';
+    const carat = hasCaratSlot && !isNodeLoading
       ? (isExpanded ? '/carat_open.png' : '/carat_closed.png')
       : null;
 
@@ -595,7 +607,16 @@ cat(toJSON(all_items, auto_unbox = TRUE))
             }
           }}
         >
-          {carat && (
+          {isNodeLoading ? (
+            <img
+              src="/snowflake-bug-color-rgb.svg"
+              alt="Loading..."
+              className="w-3 h-3 mr-2"
+              style={{
+                animation: 'snowflake-pulse 1.5s ease-in-out infinite'
+              }}
+            />
+          ) : carat ? (
             <img
               src={carat}
               alt=""
@@ -605,8 +626,9 @@ cat(toJSON(all_items, auto_unbox = TRUE))
                 toggleNode(node);
               }}
             />
+          ) : (
+            <span className="w-3 mr-2"></span>
           )}
-          {!carat && <span className="w-3 mr-2"></span>}
 
           <img
             src={icon}
@@ -637,6 +659,18 @@ cat(toJSON(all_items, auto_unbox = TRUE))
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <style>{`
+        @keyframes snowflake-pulse {
+          0%, 100% {
+            transform: scale(0.5);
+            opacity: 0.6;
+          }
+          50% {
+            transform: scale(1.5);
+            opacity: 1;
+          }
+        }
+      `}</style>
       <div className="bg-[#ecf2f4] rounded-lg shadow-xl w-[960px] h-[720px] flex flex-col">
         {/* Header */}
         <div className="p-4 flex items-center flex-shrink-0">
@@ -648,12 +682,6 @@ cat(toJSON(all_items, auto_unbox = TRUE))
           <div className="bg-white border border-gray-300 rounded flex-1 min-h-0 overflow-auto relative">
             {isLoading && (
               <div className="absolute inset-0 flex items-center justify-center">
-                <style>{`
-                  @keyframes snowflake-pulse {
-                    0%, 100% { transform: scale(1); }
-                    50% { transform: scale(1.15); }
-                  }
-                `}</style>
                 <img
                   src="/snowflake-bug-color-rgb.svg"
                   alt="Loading..."
