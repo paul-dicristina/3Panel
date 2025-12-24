@@ -711,40 +711,97 @@ Please respond with a JSON object in this format:
   };
 
   const handleLoadSnowflakeTables = async (selectedItems) => {
+    setIsLoading(true);
+
     for (const item of selectedItems) {
       const varName = item.name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+      const fullTableName = `${item.database}.${item.schema}.${item.name}`;
+      const loadMessage = `Loaded ${fullTableName} (dataset variable name: ${varName})`;
 
-      const code = `
-# Load table from Snowflake
-${varName} <- sf_query("SELECT * FROM ${item.database}.${item.schema}.${item.name} LIMIT 1000")
-cat("Loaded ${item.name}: ", nrow(${varName}), " rows x ", ncol(${varName}), " columns\\n")
-`;
+      // Add user message to chat
+      const newUserMessage = {
+        id: Date.now(),
+        role: 'user',
+        content: loadMessage
+      };
+      setMessages(prev => [...prev, newUserMessage]);
 
       try {
-        await executeRCode(
-          code,
-          apiKey,
-          setCurrentOutput,
-          setCurrentCode,
-          setMessages,
-          setCodeCards,
-          setSelectedCardId,
-          messages,
-          suggestionsEnabled,
-          autoFormatTabular
-        );
+        // Call the new load-and-report-snowflake endpoint
+        const response = await fetch('http://localhost:3001/api/load-and-report-snowflake', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            database: item.database,
+            schema: item.schema,
+            tableName: item.name,
+            varName: varName,
+            apiKey: apiKey,
+            suggestionsEnabled: suggestionsEnabled
+          })
+        });
 
-        // Add success message
-        const message = {
-          id: Date.now(),
-          role: 'assistant',
-          content: `Loaded table **${item.name}** from Snowflake into variable \`${varName}\``
+        if (!response.ok) {
+          throw new Error('Failed to load and analyze Snowflake table');
+        }
+
+        const result = await response.json();
+
+        console.log('Snowflake load result:', result);
+
+        // Validate we have report sections
+        if (!result.reportSections || Object.keys(result.reportSections).length === 0) {
+          throw new Error('No analysis report was generated. The server may have failed to analyze the table.');
+        }
+
+        // Create a code card for the diagnostic code
+        const diagnosticCard = {
+          id: `card-${Date.now()}`,
+          code: result.code,
+          summary: `Dataset Diagnostics: ${fullTableName}`,
+          description: 'Comprehensive dataset analysis including structure, missing data, and tidy format assessment',
+          output: {
+            text: result.output,
+            error: result.error
+          }
         };
-        setMessages(prev => [...prev, message]);
+
+        // Add assistant response with the tabbed report
+        const assistantMessage = {
+          id: Date.now() + 1,
+          role: 'assistant',
+          content: '',  // Empty content since we'll use DatasetReport component
+          displayContent: '',
+          codeCards: [diagnosticCard],
+          suggestions: result.suggestions || [],
+          reportSections: result.reportSections,
+          filename: fullTableName
+        };
+        console.log('Creating assistant message with reportSections:', assistantMessage.reportSections);
+        setMessages(prev => [...prev, assistantMessage]);
+
+        // Add the diagnostic card to global cards array
+        setCodeCards(prev => [...prev, diagnosticCard]);
+
+        // Wait a bit before processing next item
+        if (selectedItems.indexOf(item) < selectedItems.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+
       } catch (error) {
         console.error('Error loading Snowflake table:', error);
+        const errorMessage = {
+          id: Date.now() + 2,
+          role: 'assistant',
+          content: `Error loading ${fullTableName}: ${error.message}`
+        };
+        setMessages(prev => [...prev, errorMessage]);
       }
     }
+
+    setIsLoading(false);
   };
 
   // Handle new conversation - reset all panels
@@ -1107,9 +1164,6 @@ cat("Loaded ${item.name}: ", nrow(${varName}), " rows x ", ncol(${varName}), " c
 
   // Render chat messages
   const renderMessage = (message) => {
-    // Debug: Log message being rendered
-    console.log('Rendering message:', message.id, 'reportSections:', message.reportSections, 'filename:', message.filename);
-
     // Use displayContent for assistant messages if available, otherwise use content
     const contentToDisplay = message.role === 'assistant' && message.displayContent
       ? message.displayContent

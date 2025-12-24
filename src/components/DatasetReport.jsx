@@ -1,10 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 
 const DatasetReport = ({ filename, reportSections }) => {
-  // Debug: Log props received
-  console.log('DatasetReport mounted with filename:', filename);
-  console.log('DatasetReport mounted with reportSections:', reportSections);
-
   const tabs = [
     { id: 'structure', label: 'Structure' },
     { id: 'tidyFormat', label: 'Tidy Format' },

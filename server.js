@@ -1447,15 +1447,23 @@ Write your comprehensive report in JSON format based on this actual output.`;
     try {
       let jsonText = reportText;
 
-      // Try to extract JSON from markdown code block first
-      const codeBlockMatch = reportText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-      if (codeBlockMatch) {
-        jsonText = codeBlockMatch[1];
+      // Try to extract JSON from markdown code block - find the content between ``` markers
+      if (reportText.includes('```')) {
+        const startMarker = reportText.indexOf('{');
+        const endMarker = reportText.lastIndexOf('}');
+        if (startMarker !== -1 && endMarker !== -1 && endMarker > startMarker) {
+          jsonText = reportText.substring(startMarker, endMarker + 1);
+          console.log('Extracted JSON from code block using brace positions');
+        }
       } else {
-        // Try to find JSON object, using non-greedy match
-        const jsonMatch = reportText.match(/\{[\s\S]*?\n\}/);
-        if (jsonMatch) {
-          jsonText = jsonMatch[0];
+        // No code block, try to find JSON object boundaries
+        const startMarker = reportText.indexOf('{');
+        const endMarker = reportText.lastIndexOf('}');
+        if (startMarker !== -1 && endMarker !== -1 && endMarker > startMarker) {
+          jsonText = reportText.substring(startMarker, endMarker + 1);
+          console.log('Found JSON object using brace positions');
+        } else {
+          console.log('No JSON pattern found, using entire response');
         }
       }
 
@@ -1479,13 +1487,26 @@ Write your comprehensive report in JSON format based on this actual output.`;
       reportSections = { structure: reportText };
     }
 
+    // Filter out inconsequential warnings from stderr
+    let filteredError = null;
+    if (rOutput.stderr) {
+      const lines = rOutput.stderr.split('\n')
+        .filter(line => {
+          // Remove package version mismatch warnings
+          return !line.includes('was built under R version');
+        })
+        .filter(line => line.trim().length > 0);
+
+      filteredError = lines.length > 0 ? lines.join('\n') : null;
+    }
+
     // Return complete response
     res.json({
       success: true,
       reportSections: reportSections,
       code: diagnosticCode,
       output: rOutput.stdout,
-      error: rOutput.stderr || null,
+      error: filteredError,
       suggestions: suggestions,
       filename: filename,
       variableName: baseFilename  // Add the sanitized R variable name
@@ -1496,6 +1517,280 @@ Write your comprehensive report in JSON format based on this actual output.`;
     console.error('Error stack:', error.stack);
     res.status(500).json({
       error: error.message || 'Failed to load and report on data',
+      details: error.stack
+    });
+  }
+});
+
+/**
+ * POST /api/load-and-report-snowflake
+ * Load and analyze a Snowflake table/view with comprehensive reporting
+ * Similar to load-and-report-data but for Snowflake sources
+ *
+ * Request body:
+ * - database: Snowflake database name
+ * - schema: Snowflake schema name
+ * - tableName: Snowflake table/view name
+ * - varName: R variable name to use
+ * - apiKey: Anthropic API key
+ * - suggestionsEnabled: Whether suggestions are enabled
+ */
+app.post('/api/load-and-report-snowflake', async (req, res) => {
+  const tempDir = join(tmpdir(), '3panel-r-execution');
+  const workspacePath = join(tempDir, 'workspace.RData');
+
+  try {
+    const { database, schema, tableName, varName, apiKey, suggestionsEnabled } = req.body;
+
+    if (!database || !schema || !tableName || !varName || !apiKey) {
+      return res.status(400).json({ error: 'Database, schema, table name, variable name, and API key are required' });
+    }
+
+    // Ensure temp directory exists
+    await mkdir(tempDir, { recursive: true });
+
+    // Initialize Anthropic client
+    const anthropic = new Anthropic({ apiKey });
+
+    // ==== PHASE 1: Generate explicit diagnostic R code ====
+    const diagnosticCode = `# Suppress package startup messages
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+})
+
+# Load table from Snowflake
+${varName} <- sf_query("SELECT * FROM ${database}.${schema}.${tableName} LIMIT 1000")
+
+# Dimensions
+cat("Dimensions:\\n")
+cat(paste("Rows:", nrow(${varName}), "\\n"))
+cat(paste("Columns:", ncol(${varName}), "\\n\\n"))
+
+# Column names
+cat("Column names:\\n")
+print(names(${varName}))
+cat("\\n")
+
+# Missing values per column
+cat("Missing values per column:\\n")
+print(colSums(is.na(${varName})))
+cat("\\nTotal missing values:", sum(is.na(${varName})), "out of", nrow(${varName}) * ncol(${varName}), "total cells\\n\\n")
+
+# Structure
+cat("Data structure:\\n")
+str(${varName})
+cat("\\n")
+
+# First few rows
+cat("First few rows:\\n")
+print(head(${varName}))
+cat("\\n")
+
+# Check for tidy format issues
+cat("Checking for tidy format issues...\\n")
+col_names <- names(${varName})
+year_cols <- grep("^X?[0-9]{4}$", col_names, value = TRUE)
+month_cols <- grep("^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)", col_names, value = TRUE, ignore.case = TRUE)
+
+if (length(year_cols) > 0) {
+  cat("⚠️  Column names that appear to be years:", paste(year_cols, collapse = ", "), "\\n")
+  cat("   Suggest using pivot_longer() to reshape these columns into rows\\n")
+} else if (length(month_cols) > 0) {
+  cat("⚠️  Column names that appear to be months:", paste(month_cols, collapse = ", "), "\\n")
+  cat("   Suggest using pivot_longer() to reshape these columns into rows\\n")
+} else {
+  cat("✓ Column names appear to be proper variable names\\n")
+}`;
+
+    // ==== Execute the diagnostic R code ====
+    const timestamp = Date.now();
+    const scriptPath = join(tempDir, `diagnostic_snowflake_${timestamp}.R`);
+
+    // Prepare R script with workspace loading
+    const fullScript = `
+# Load workspace if it exists
+workspace_path <- "${workspacePath.replace(/\\/g, '/')}"
+if (file.exists(workspace_path)) {
+  load(workspace_path)
+}
+
+# Execute diagnostic code
+${diagnosticCode}
+
+# Save workspace
+save.image(workspace_path)
+`;
+
+    await writeFile(scriptPath, fullScript);
+
+    // Execute R script
+    const rOutput = await new Promise((resolve, reject) => {
+      exec(`Rscript "${scriptPath}"`, {
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: 60000
+      }, (error, stdout, stderr) => {
+        if (error && !stdout) {
+          reject(new Error(stderr || error.message));
+        } else {
+          resolve({ stdout, stderr });
+        }
+      });
+    });
+
+    // Clean up script file
+    await unlink(scriptPath).catch(() => {});
+
+    // Validate that we got output
+    if (!rOutput.stdout || rOutput.stdout.trim().length === 0) {
+      console.error('R execution produced no output');
+      return res.status(500).json({
+        error: 'R execution produced no output',
+        details: rOutput.stderr || 'Unknown error'
+      });
+    }
+
+    // ==== PHASE 2: Have Claude analyze the actual output and write report ====
+    let reportSystemPrompt = `You are a data analysis assistant. You have just executed R code to load and examine a Snowflake table.
+
+The user loaded a Snowflake table "${database}.${schema}.${tableName}". The R diagnostic code has been executed and you can see the ACTUAL output below.
+
+Based on the ACTUAL R output, write a comprehensive report in JSON format with these sections:
+
+{
+  "structure": "Text describing exact dimensions and time range if applicable",
+  "tidyFormat": "Text describing whether dataset is tidy and what needs to be reshaped",
+  "missingData": "Text describing missing data patterns and counts",
+  "subject": "Text describing what the dataset is about",
+  "insights": "Text describing analysis potential and data completeness"
+}
+
+For each section:
+- Write 3-5 sentences in paragraph format
+- Be concise and specific
+- Base your report ENTIRELY on the R output shown below
+
+SPECIAL FORMATTING for "structure" section:
+- After your paragraph describing the structure, add TWO newlines, then add a line that starts with "Columns:\n"
+- On the next line, show a horizontal list of the first 10 column names, each followed by a comma, then TWO non-breaking spaces (Unicode \u00A0\u00A0)
+- If there are more than 10 columns, the last item in the list should be a count like "10 more cols" instead of the 10th column name
+- Example with 8 columns: "The dataset has 100 rows and 8 columns.\n\nColumns:\nCountry,\u00A0\u00A0Region,\u00A0\u00A0Year,\u00A0\u00A0Population,\u00A0\u00A0GDP,\u00A0\u00A0Unemployment,\u00A0\u00A0Inflation,\u00A0\u00A0Exports,"
+- Example with 15 columns: "The dataset has 200 rows and 15 columns.\n\nColumns:\nCountry,\u00A0\u00A0Region,\u00A0\u00A0Year,\u00A0\u00A0Population,\u00A0\u00A0GDP,\u00A0\u00A0Unemployment,\u00A0\u00A0Inflation,\u00A0\u00A0Exports,\u00A0\u00A0Imports,\u00A0\u00A05 more cols"
+
+CRITICAL: Return ONLY valid JSON. Do NOT include any text before or after the JSON object.`;
+
+    if (suggestionsEnabled) {
+      reportSystemPrompt += `
+
+Add a "suggestions" field with 2-4 specific analysis suggestions. If the data is NOT in tidy format, the FIRST suggestion must be a specific prompt to convert it using pivot_longer() or appropriate transformation.`;
+    }
+
+    const reportPrompt = `Here is the R output from loading and examining the Snowflake table:
+
+\`\`\`
+${rOutput.stdout}
+\`\`\`
+
+${rOutput.stderr ? `\nWarnings/Messages:\n${rOutput.stderr}\n` : ''}
+
+Write your comprehensive report in JSON format based on this actual output.`;
+
+    const phase2Response = await anthropic.messages.create({
+      model: 'claude-opus-4-5-20251101',
+      max_tokens: 2048,
+      system: reportSystemPrompt,
+      messages: [{ role: 'user', content: reportPrompt }]
+    });
+
+    const reportText = phase2Response.content[0].text;
+    console.log('=== SNOWFLAKE REPORT GENERATION ===');
+    console.log('Raw Claude response length:', reportText.length);
+    console.log('First 500 chars:', reportText.substring(0, 500));
+
+    // Parse JSON report
+    let reportSections = {};
+    let suggestions = [];
+
+    try {
+      let jsonText = reportText;
+
+      // Try to extract JSON from markdown code block - find the content between ``` markers
+      if (reportText.includes('```')) {
+        const startMarker = reportText.indexOf('{');
+        const endMarker = reportText.lastIndexOf('}');
+        if (startMarker !== -1 && endMarker !== -1 && endMarker > startMarker) {
+          jsonText = reportText.substring(startMarker, endMarker + 1);
+          console.log('Extracted JSON from code block using brace positions');
+        }
+      } else {
+        // No code block, try to find JSON object boundaries
+        const startMarker = reportText.indexOf('{');
+        const endMarker = reportText.lastIndexOf('}');
+        if (startMarker !== -1 && endMarker !== -1 && endMarker > startMarker) {
+          jsonText = reportText.substring(startMarker, endMarker + 1);
+          console.log('Found JSON object using brace positions');
+        } else {
+          console.log('No JSON pattern found, using entire response');
+        }
+      }
+
+      console.log('JSON to parse (first 300 chars):', jsonText.substring(0, 300));
+      const reportData = JSON.parse(jsonText);
+      console.log('Successfully parsed JSON, keys:', Object.keys(reportData));
+
+      reportSections = {
+        structure: reportData.structure || '',
+        tidyFormat: reportData.tidyFormat || '',
+        missingData: reportData.missingData || '',
+        subject: reportData.subject || '',
+        insights: reportData.insights || ''
+      };
+      suggestions = reportData.suggestions || [];
+
+      console.log('Report sections created:', Object.keys(reportSections));
+      console.log('Structure length:', reportSections.structure?.length || 0);
+      console.log('Suggestions count:', suggestions.length);
+    } catch (e) {
+      console.error('SNOWFLAKE: Failed to parse report JSON:', e.message);
+      console.error('Full error:', e);
+      console.error('Raw response text (first 1000 chars):', reportText.substring(0, 1000));
+      // Fallback to original text format
+      reportSections = { structure: reportText };
+      console.log('Using fallback reportSections');
+    }
+
+    console.log('Final reportSections keys before sending:', Object.keys(reportSections));
+
+    // Filter out inconsequential warnings from stderr
+    let filteredError = null;
+    if (rOutput.stderr) {
+      const lines = rOutput.stderr.split('\n')
+        .filter(line => {
+          // Remove package version mismatch warnings
+          return !line.includes('was built under R version');
+        })
+        .filter(line => line.trim().length > 0);
+
+      filteredError = lines.length > 0 ? lines.join('\n') : null;
+    }
+
+    // Return complete response
+    res.json({
+      success: true,
+      reportSections: reportSections,
+      code: diagnosticCode,
+      output: rOutput.stdout,
+      error: filteredError,
+      suggestions: suggestions,
+      tableName: `${database}.${schema}.${tableName}`,
+      variableName: varName
+    });
+
+  } catch (error) {
+    console.error('Error in load-and-report-snowflake:', error);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({
+      error: error.message || 'Failed to load and report on Snowflake table',
       details: error.stack
     });
   }
