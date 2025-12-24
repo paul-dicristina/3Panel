@@ -1490,14 +1490,31 @@ Write your comprehensive report in JSON format based on this actual output.`;
     // Filter out inconsequential warnings from stderr
     let filteredError = null;
     if (rOutput.stderr) {
-      const lines = rOutput.stderr.split('\n')
-        .filter(line => {
-          // Remove package version mismatch warnings
-          return !line.includes('was built under R version');
-        })
-        .filter(line => line.trim().length > 0);
+      const lines = rOutput.stderr.split('\n');
+      const filtered = [];
 
-      filteredError = lines.length > 0 ? lines.join('\n') : null;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const nextLine = i < lines.length - 1 ? lines[i + 1] : '';
+
+        // Skip "Warning message:" if next line is about package version
+        if (line.trim() === 'Warning message:' && nextLine.includes('was built under R version')) {
+          i++; // Skip the next line too
+          continue;
+        }
+
+        // Skip lines about package version mismatches
+        if (line.includes('was built under R version')) {
+          continue;
+        }
+
+        // Keep non-empty lines
+        if (line.trim().length > 0) {
+          filtered.push(line);
+        }
+      }
+
+      filteredError = filtered.length > 0 ? filtered.join('\n') : null;
     }
 
     // Return complete response
@@ -1764,14 +1781,31 @@ Write your comprehensive report in JSON format based on this actual output.`;
     // Filter out inconsequential warnings from stderr
     let filteredError = null;
     if (rOutput.stderr) {
-      const lines = rOutput.stderr.split('\n')
-        .filter(line => {
-          // Remove package version mismatch warnings
-          return !line.includes('was built under R version');
-        })
-        .filter(line => line.trim().length > 0);
+      const lines = rOutput.stderr.split('\n');
+      const filtered = [];
 
-      filteredError = lines.length > 0 ? lines.join('\n') : null;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const nextLine = i < lines.length - 1 ? lines[i + 1] : '';
+
+        // Skip "Warning message:" if next line is about package version
+        if (line.trim() === 'Warning message:' && nextLine.includes('was built under R version')) {
+          i++; // Skip the next line too
+          continue;
+        }
+
+        // Skip lines about package version mismatches
+        if (line.includes('was built under R version')) {
+          continue;
+        }
+
+        // Keep non-empty lines
+        if (line.trim().length > 0) {
+          filtered.push(line);
+        }
+      }
+
+      filteredError = filtered.length > 0 ? filtered.join('\n') : null;
     }
 
     // Return complete response
