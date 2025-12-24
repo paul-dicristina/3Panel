@@ -7,6 +7,7 @@ import ReactMarkdown from 'react-markdown';
 import ApiKeyModal from './components/ApiKeyModal';
 import CodeCard from './components/CodeCard';
 import DatasetReport from './components/DatasetReport';
+import SnowflakeBrowserModal from './components/SnowflakeBrowserModal';
 import { sendMessageToClaude } from './utils/claudeApi';
 import { executeRCode } from './utils/rExecutor';
 
@@ -50,6 +51,7 @@ function App() {
   const [isSubmitAnimating, setIsSubmitAnimating] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const [showSnowflakeModal, setShowSnowflakeModal] = useState(false);
 
   // Refs for resizable panels
   const splitInstanceRef = useRef(null);
@@ -703,6 +705,48 @@ Please respond with a JSON object in this format:
     }
   };
 
+  // Handle Snowflake browser modal
+  const handleOpenSnowflake = () => {
+    setShowSnowflakeModal(true);
+  };
+
+  const handleLoadSnowflakeTables = async (selectedItems) => {
+    for (const item of selectedItems) {
+      const varName = item.name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+
+      const code = `
+# Load table from Snowflake
+${varName} <- sf_query("SELECT * FROM ${item.database}.${item.schema}.${item.name} LIMIT 1000")
+cat("Loaded ${item.name}: ", nrow(${varName}), " rows x ", ncol(${varName}), " columns\\n")
+`;
+
+      try {
+        await executeRCode(
+          code,
+          apiKey,
+          setCurrentOutput,
+          setCurrentCode,
+          setMessages,
+          setCodeCards,
+          setSelectedCardId,
+          messages,
+          suggestionsEnabled,
+          autoFormatTabular
+        );
+
+        // Add success message
+        const message = {
+          id: Date.now(),
+          role: 'assistant',
+          content: `Loaded table **${item.name}** from Snowflake into variable \`${varName}\``
+        };
+        setMessages(prev => [...prev, message]);
+      } catch (error) {
+        console.error('Error loading Snowflake table:', error);
+      }
+    }
+  };
+
   // Handle new conversation - reset all panels
   const handleNewConversation = async () => {
     setMessages([]);
@@ -1315,6 +1359,13 @@ Please respond with a JSON object in this format:
               className="h-4 cursor-pointer"
               onClick={handleLoadData}
             />
+            <img
+              src="/snowflake-bug-color-rgb.svg"
+              alt="Browse Snowflake"
+              className="h-4 cursor-pointer"
+              onClick={handleOpenSnowflake}
+              title="Browse Snowflake"
+            />
             <img src="/separator.png" alt="" className="h-4" />
             <img
               src="/new-conversation.png"
@@ -1685,6 +1736,13 @@ Please respond with a JSON object in this format:
             setShowApiKeyModal(false);
           }
         }}
+      />
+
+      {/* Snowflake Browser Modal */}
+      <SnowflakeBrowserModal
+        isOpen={showSnowflakeModal}
+        onClose={() => setShowSnowflakeModal(false)}
+        onLoad={handleLoadSnowflakeTables}
       />
     </div>
   );
