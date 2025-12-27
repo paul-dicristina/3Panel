@@ -1387,39 +1387,46 @@ save.image(workspace_path)
     }
 
     // ==== PHASE 2: Have Claude analyze the actual output and write report ====
+    const jsonSchema = suggestionsEnabled ? `{
+  "structure": "Text describing exact dimensions and time range if applicable",
+  "tidyFormat": "Text describing whether dataset is tidy and what needs to be reshaped",
+  "missingData": "Text describing missing data patterns and counts",
+  "subject": "Text describing what the dataset is about",
+  "insights": "Text describing analysis potential and data completeness",
+  "suggestions": ["Array of 2-4 specific analysis suggestions"]
+}` : `{
+  "structure": "Text describing exact dimensions and time range if applicable",
+  "tidyFormat": "Text describing whether dataset is tidy and what needs to be reshaped",
+  "missingData": "Text describing missing data patterns and counts",
+  "subject": "Text describing what the dataset is about",
+  "insights": "Text describing analysis potential and data completeness"
+}`;
+
     let reportSystemPrompt = `You are a data analysis assistant. You have just executed R code to load and examine a dataset.
 
 The user loaded a file called "${filename}". The R diagnostic code has been executed and you can see the ACTUAL output below.
 
 Based on the ACTUAL R output, write a comprehensive report in JSON format with these sections:
 
-{
-  "structure": "Text describing exact dimensions and time range if applicable",
-  "tidyFormat": "Text describing whether dataset is tidy and what needs to be reshaped",
-  "missingData": "Text describing missing data patterns and counts",
-  "subject": "Text describing what the dataset is about",
-  "insights": "Text describing analysis potential and data completeness"
-}
+${jsonSchema}
 
 For each section:
 - Write 3-5 sentences in paragraph format
 - Be concise and specific
 - Base your report ENTIRELY on the R output shown below
+${suggestionsEnabled ? '\n- For suggestions: provide 2-4 specific, actionable prompts. If data is NOT in tidy format, FIRST suggestion must be a specific prompt to convert it using pivot_longer().' : ''}
 
 SPECIAL FORMATTING for "structure" section:
-- After your paragraph describing the structure, add TWO newlines, then add a line that starts with "Columns:\n"
+- After your paragraph describing the structure, add TWO newlines, then add a line that starts with "Columns:" followed by a newline
 - On the next line, show a horizontal list of the first 10 column names, each followed by a comma, then TWO non-breaking spaces (Unicode \u00A0\u00A0)
 - If there are more than 10 columns, the last item in the list should be a count like "10 more cols" instead of the 10th column name
-- Example with 8 columns: "The dataset has 100 rows and 8 columns.\n\nColumns:\nCountry,\u00A0\u00A0Region,\u00A0\u00A0Year,\u00A0\u00A0Population,\u00A0\u00A0GDP,\u00A0\u00A0Unemployment,\u00A0\u00A0Inflation,\u00A0\u00A0Exports,"
-- Example with 15 columns: "The dataset has 200 rows and 15 columns.\n\nColumns:\nCountry,\u00A0\u00A0Region,\u00A0\u00A0Year,\u00A0\u00A0Population,\u00A0\u00A0GDP,\u00A0\u00A0Unemployment,\u00A0\u00A0Inflation,\u00A0\u00A0Exports,\u00A0\u00A0Imports,\u00A0\u00A05 more cols"
+- Example with 8 columns: "The dataset has 100 rows and 8 columns.\\n\\nColumns:\\nCountry,\u00A0\u00A0Region,\u00A0\u00A0Year,\u00A0\u00A0Population,\u00A0\u00A0GDP,\u00A0\u00A0Unemployment,\u00A0\u00A0Inflation,\u00A0\u00A0Exports,"
+- Example with 15 columns: "The dataset has 200 rows and 15 columns.\\n\\nColumns:\\nCountry,\u00A0\u00A0Region,\u00A0\u00A0Year,\u00A0\u00A0Population,\u00A0\u00A0GDP,\u00A0\u00A0Unemployment,\u00A0\u00A0Inflation,\u00A0\u00A0Exports,\u00A0\u00A0Imports,\u00A0\u00A05 more cols"
 
-CRITICAL: Return ONLY valid JSON. Do NOT include any text before or after the JSON object.`;
-
-    if (suggestionsEnabled) {
-      reportSystemPrompt += `
-
-Add a "suggestions" field with 2-4 specific analysis suggestions. If the data is NOT in tidy format, the FIRST suggestion must be a specific prompt to convert it using pivot_longer() or appropriate transformation.`;
-    }
+CRITICAL REQUIREMENTS:
+- Return ONLY the raw JSON object - no markdown code blocks, no \`\`\`json\`\`\`, no extra text
+- All newlines in strings must be escaped as \\n
+- All string values must use proper JSON escaping`;
 
     const reportPrompt = `Here is the R output from loading and examining the dataset:
 
@@ -1668,39 +1675,46 @@ save.image(workspace_path)
     }
 
     // ==== PHASE 2: Have Claude analyze the actual output and write report ====
+    const jsonSchema = suggestionsEnabled ? `{
+  "structure": "Text describing exact dimensions and time range if applicable",
+  "tidyFormat": "Text describing whether dataset is tidy and what needs to be reshaped",
+  "missingData": "Text describing missing data patterns and counts",
+  "subject": "Text describing what the dataset is about",
+  "insights": "Text describing analysis potential and data completeness",
+  "suggestions": ["Array of 2-4 specific analysis suggestions"]
+}` : `{
+  "structure": "Text describing exact dimensions and time range if applicable",
+  "tidyFormat": "Text describing whether dataset is tidy and what needs to be reshaped",
+  "missingData": "Text describing missing data patterns and counts",
+  "subject": "Text describing what the dataset is about",
+  "insights": "Text describing analysis potential and data completeness"
+}`;
+
     let reportSystemPrompt = `You are a data analysis assistant. You have just executed R code to load and examine a Snowflake table.
 
 The user loaded a Snowflake table "${database}.${schema}.${tableName}". The R diagnostic code has been executed and you can see the ACTUAL output below.
 
 Based on the ACTUAL R output, write a comprehensive report in JSON format with these sections:
 
-{
-  "structure": "Text describing exact dimensions and time range if applicable",
-  "tidyFormat": "Text describing whether dataset is tidy and what needs to be reshaped",
-  "missingData": "Text describing missing data patterns and counts",
-  "subject": "Text describing what the dataset is about",
-  "insights": "Text describing analysis potential and data completeness"
-}
+${jsonSchema}
 
 For each section:
 - Write 3-5 sentences in paragraph format
 - Be concise and specific
 - Base your report ENTIRELY on the R output shown below
+${suggestionsEnabled ? '\n- For suggestions: provide 2-4 specific, actionable prompts. If data is NOT in tidy format, FIRST suggestion must be a specific prompt to convert it using pivot_longer().' : ''}
 
 SPECIAL FORMATTING for "structure" section:
-- After your paragraph describing the structure, add TWO newlines, then add a line that starts with "Columns:\n"
+- After your paragraph describing the structure, add TWO newlines, then add a line that starts with "Columns:" followed by a newline
 - On the next line, show a horizontal list of the first 10 column names, each followed by a comma, then TWO non-breaking spaces (Unicode \u00A0\u00A0)
 - If there are more than 10 columns, the last item in the list should be a count like "10 more cols" instead of the 10th column name
-- Example with 8 columns: "The dataset has 100 rows and 8 columns.\n\nColumns:\nCountry,\u00A0\u00A0Region,\u00A0\u00A0Year,\u00A0\u00A0Population,\u00A0\u00A0GDP,\u00A0\u00A0Unemployment,\u00A0\u00A0Inflation,\u00A0\u00A0Exports,"
-- Example with 15 columns: "The dataset has 200 rows and 15 columns.\n\nColumns:\nCountry,\u00A0\u00A0Region,\u00A0\u00A0Year,\u00A0\u00A0Population,\u00A0\u00A0GDP,\u00A0\u00A0Unemployment,\u00A0\u00A0Inflation,\u00A0\u00A0Exports,\u00A0\u00A0Imports,\u00A0\u00A05 more cols"
+- Example with 8 columns: "The dataset has 100 rows and 8 columns.\\n\\nColumns:\\nCountry,\u00A0\u00A0Region,\u00A0\u00A0Year,\u00A0\u00A0Population,\u00A0\u00A0GDP,\u00A0\u00A0Unemployment,\u00A0\u00A0Inflation,\u00A0\u00A0Exports,"
+- Example with 15 columns: "The dataset has 200 rows and 15 columns.\\n\\nColumns:\\nCountry,\u00A0\u00A0Region,\u00A0\u00A0Year,\u00A0\u00A0Population,\u00A0\u00A0GDP,\u00A0\u00A0Unemployment,\u00A0\u00A0Inflation,\u00A0\u00A0Exports,\u00A0\u00A0Imports,\u00A0\u00A05 more cols"
 
-CRITICAL: Return ONLY valid JSON. Do NOT include any text before or after the JSON object.`;
-
-    if (suggestionsEnabled) {
-      reportSystemPrompt += `
-
-Add a "suggestions" field with 2-4 specific analysis suggestions. If the data is NOT in tidy format, the FIRST suggestion must be a specific prompt to convert it using pivot_longer() or appropriate transformation.`;
-    }
+CRITICAL REQUIREMENTS:
+- Return ONLY the raw JSON object - no markdown code blocks, no \`\`\`json\`\`\`, no extra text
+- All newlines in strings must be escaped as \\n
+- All string values must use proper JSON escaping`;
 
     const reportPrompt = `Here is the R output from loading and examining the Snowflake table:
 

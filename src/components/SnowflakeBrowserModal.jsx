@@ -14,8 +14,10 @@ const SnowflakeBrowserModal = ({ isOpen, onClose, onLoad }) => {
       loadDatabases();
       setLoadingNodeId(null);
     } else {
-      // Clear loading state when modal closes
+      // Clear state when modal closes
       setLoadingNodeId(null);
+      setExpandedNodes(new Set());
+      setSelectedItems([]);
     }
   }, [isOpen]);
 
@@ -596,7 +598,7 @@ cat(toJSON(all_items, auto_unbox = TRUE))
       <div key={node.id}>
         <div
           className={`flex items-center py-1 px-2 cursor-pointer ${
-            isSelected ? 'bg-[#29b5e8] text-white' : 'hover:bg-gray-100'
+            isSelected ? 'bg-[#3686c1] text-white' : 'hover:bg-gray-100'
           }`}
           style={{ paddingLeft: `${level * 20 + 8}px` }}
           onClick={(e) => {
@@ -671,7 +673,7 @@ cat(toJSON(all_items, auto_unbox = TRUE))
           }
         }
       `}</style>
-      <div className="bg-[#ecf2f4] rounded-lg shadow-xl w-[960px] h-[720px] flex flex-col">
+      <div className="bg-[#edeff0] rounded-lg shadow-xl w-[960px] h-[720px] flex flex-col">
         {/* Header */}
         <div className="p-4 flex items-center flex-shrink-0">
           <img src="/snowflake-logo-color-rgb.svg" alt="Snowflake" className="h-8" />
@@ -679,7 +681,7 @@ cat(toJSON(all_items, auto_unbox = TRUE))
 
         {/* Tree View */}
         <div className="flex-1 min-h-0 px-4 py-2 flex flex-col">
-          <div className="bg-white border border-gray-300 rounded flex-1 min-h-0 overflow-auto relative">
+          <div className="bg-white border border-gray-300 rounded-md flex-1 min-h-0 overflow-auto relative">
             {isLoading && (
               <div className="absolute inset-0 flex items-center justify-center">
                 <img
@@ -725,14 +727,14 @@ cat(toJSON(all_items, auto_unbox = TRUE))
           <div className="flex gap-4">
             <button
               onClick={onClose}
-              className="w-24 px-4 py-2 bg-white border border-gray-300 rounded hover:bg-gray-100"
+              className="w-24 px-4 py-2 bg-white border border-gray-300 rounded-md hover:bg-gray-100"
             >
               Cancel
             </button>
             <button
               onClick={handleLoad}
               disabled={selectedItems.length === 0}
-              className="w-24 px-4 py-2 bg-[#29b5e8] text-white rounded hover:bg-[#1da5d8] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-24 px-4 py-2 bg-[#3686c1] text-white rounded-md hover:bg-[#2a6a9a] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Open
             </button>
