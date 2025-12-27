@@ -7,6 +7,7 @@ const SnowflakeBrowserModal = ({ isOpen, onClose, onLoad }) => {
   const [selectedItems, setSelectedItems] = useState([]);
   const [error, setError] = useState(null);
   const [loadingNodeId, setLoadingNodeId] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
 
   // Load databases when modal opens
   useEffect(() => {
@@ -18,6 +19,7 @@ const SnowflakeBrowserModal = ({ isOpen, onClose, onLoad }) => {
       setLoadingNodeId(null);
       setExpandedNodes(new Set());
       setSelectedItems([]);
+      setSearchTerm('');
     }
   }, [isOpen]);
 
@@ -675,12 +677,34 @@ cat(toJSON(all_items, auto_unbox = TRUE))
       `}</style>
       <div className="bg-[#edeff0] rounded-lg shadow-xl w-[960px] h-[720px] flex flex-col">
         {/* Header */}
-        <div className="p-4 flex items-center flex-shrink-0">
+        <div className="p-4 flex items-center justify-between flex-shrink-0">
           <img src="/snowflake-logo-color-rgb.svg" alt="Snowflake" className="h-8" />
+          <div className="relative" style={{ width: '240px' }}>
+            <img
+              src="/search.svg"
+              alt=""
+              className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 pointer-events-none"
+            />
+            <input
+              type="text"
+              placeholder="Search databases..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-9 pr-9 py-1.5 border border-gray-300 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-[#3686c1] focus:border-transparent"
+            />
+            {searchTerm && (
+              <img
+                src="/clear-search.svg"
+                alt="Clear search"
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 cursor-pointer"
+                onClick={() => setSearchTerm('')}
+              />
+            )}
+          </div>
         </div>
 
         {/* Tree View */}
-        <div className="flex-1 min-h-0 px-4 py-2 flex flex-col">
+        <div className="flex-1 min-h-0 px-4 py-1.5 flex flex-col">
           <div className="bg-white border border-gray-300 rounded-md flex-1 min-h-0 overflow-auto relative">
             {isLoading && (
               <div className="absolute inset-0 flex items-center justify-center">
@@ -701,11 +725,23 @@ cat(toJSON(all_items, auto_unbox = TRUE))
               </div>
             )}
 
-            {!isLoading && !error && treeData.length > 0 && (
-              <>
-                {treeData.map(node => renderNode(node))}
-              </>
-            )}
+            {!isLoading && !error && treeData.length > 0 && (() => {
+              const filteredData = searchTerm
+                ? treeData.filter(node =>
+                    node.name.toLowerCase().includes(searchTerm.toLowerCase())
+                  )
+                : treeData;
+
+              return filteredData.length > 0 ? (
+                <>
+                  {filteredData.map(node => renderNode(node))}
+                </>
+              ) : (
+                <div className="text-gray-500 text-center p-4">
+                  No databases match "{searchTerm}"
+                </div>
+              );
+            })()}
 
             {!isLoading && !error && treeData.length === 0 && (
               <div className="text-gray-500 text-center p-4">

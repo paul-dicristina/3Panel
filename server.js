@@ -298,6 +298,46 @@ DATA ACCESS:
 - You can also use R's built-in datasets: iris, cars, ToothGrowth, PlantGrowth, etc.
 - For remote data, you can use URLs: read.csv(url('https://example.com/data.csv'))
 
+CRITICAL - DISPLAYING DATA IN R:
+When the user asks to "show all rows" or "display the data", generate R code that works correctly:
+
+CORRECT APPROACHES:
+1. Just use the variable name by itself (most robust):
+   \`\`\`r
+   iris_data
+   \`\`\`
+
+2. Use as_tibble() to convert first, then print:
+   \`\`\`r
+   library(dplyr)
+   as_tibble(iris_data)
+   \`\`\`
+
+3. Use head() with the actual row count:
+   \`\`\`r
+   head(iris_data, n = nrow(iris_data))
+   \`\`\`
+
+WRONG APPROACHES (DO NOT DO THESE):
+- DO NOT use: print(iris_data, n = Inf)  ← This FAILS on regular data frames!
+- DO NOT use: print(iris_data, n = 1000)  ← The 'n' parameter only works with tibbles!
+
+EXPLANATION:
+- The 'n' parameter in print() ONLY works with tibble objects (from dplyr/tibble packages)
+- Regular data frames from read.csv(), sf_query(), and other sources will ERROR with 'n' parameter
+- Using just the variable name invokes the default print method, which always works
+- If you need to control row display, convert to tibble first with as_tibble()
+
+EXAMPLES:
+User: "show all rows of iris_data"
+Correct: iris_data
+Wrong: print(iris_data, n = Inf)
+
+User: "display the customers data"
+Correct: customers
+Or: library(dplyr); as_tibble(customers)
+Wrong: print(customers, n = Inf)
+
 CRITICAL - WORKING WITH EXTERNAL DATA:
 When working with external CSV files or URLs, you MUST follow this exact pattern:
 
