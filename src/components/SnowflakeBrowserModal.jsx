@@ -720,7 +720,7 @@ cat(toJSON(all_items, auto_unbox = TRUE))
         <div className="flex-1 min-h-0 pt-4 pb-1.5 pr-4 flex flex-col">
           <div className="bg-white border border-gray-300 rounded-md flex-1 min-h-0 overflow-hidden relative flex flex-col">
             {/* Search box inside tree view */}
-            <div className="py-2 px-3 border-b border-gray-300 flex-shrink-0">
+            <div className="py-[3px] px-3 border-b border-gray-300 flex-shrink-0">
               <div className="relative" style={{ width: '312px' }}>
                 <img
                   src="/search.svg"
