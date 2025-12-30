@@ -8,6 +8,7 @@ const SnowflakeBrowserModal = ({ isOpen, onClose, onLoad }) => {
   const [error, setError] = useState(null);
   const [loadingNodeId, setLoadingNodeId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedDataSource, setSelectedDataSource] = useState('snowflake'); // 'snowflake' or 'databricks'
 
   // Load databases when modal opens
   useEffect(() => {
@@ -692,41 +693,64 @@ cat(toJSON(all_items, auto_unbox = TRUE))
           }
         }
       `}</style>
-      <div className="bg-[#edeff0] rounded-lg shadow-xl w-[960px] h-[720px] flex flex-col">
-        {/* Header */}
-        <div className="p-4 flex items-center justify-between flex-shrink-0">
-          <img src="/snowflake-logo-color-rgb.svg" alt="Snowflake" className="h-8" />
-          <div className="relative" style={{ width: '240px' }}>
-            <img
-              src="/search.svg"
-              alt=""
-              className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 pointer-events-none"
-            />
-            <input
-              type="text"
-              placeholder="Search databases..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-9 py-1.5 border border-gray-300 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-[#3686c1] focus:border-transparent"
-            />
-            {searchTerm && (
-              <img
-                src="/clear-search.svg"
-                alt="Clear search"
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 cursor-pointer"
-                onClick={() => setSearchTerm('')}
-              />
-            )}
-          </div>
+      <div className="bg-[#edeff0] rounded-lg shadow-xl w-[1000px] h-[760px] flex flex-row">
+        {/* Data Source Selector */}
+        <div className="w-[40px] flex-shrink-0 bg-[#edeff0] flex flex-col items-center py-4 gap-3 mx-2">
+          <button
+            onClick={() => setSelectedDataSource('snowflake')}
+            className={`w-10 h-10 flex items-center justify-center rounded transition-all ${
+              selectedDataSource === 'snowflake' ? 'bg-white border border-gray-300' : 'opacity-50 hover:opacity-75'
+            }`}
+            title="Snowflake"
+          >
+            <img src="/snowflake-bug-color-rgb.svg" alt="Snowflake" className="w-7 h-7" />
+          </button>
+          <button
+            onClick={() => setSelectedDataSource('databricks')}
+            className={`w-10 h-10 flex items-center justify-center rounded transition-all ${
+              selectedDataSource === 'databricks' ? 'bg-white border border-gray-300' : 'opacity-50 hover:opacity-75'
+            }`}
+            title="Databricks"
+          >
+            <img src="/databricks-symbol-color.svg" alt="Databricks" className="w-7 h-7" />
+          </button>
         </div>
 
-        {/* Tree View */}
-        <div className="flex-1 min-h-0 px-4 py-1.5 flex flex-col">
-          <div className="bg-white border border-gray-300 rounded-md flex-1 min-h-0 overflow-auto relative">
+        {/* Main Content Area */}
+        <div className="flex-1 min-h-0 pt-4 pb-1.5 pr-4 flex flex-col">
+          <div className="bg-white border border-gray-300 rounded-md flex-1 min-h-0 overflow-hidden relative flex flex-col">
+            {/* Search box inside tree view */}
+            <div className="py-2 px-3 border-b border-gray-300 flex-shrink-0">
+              <div className="relative" style={{ width: '312px' }}>
+                <img
+                  src="/search.svg"
+                  alt=""
+                  className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 pointer-events-none"
+                />
+                <input
+                  type="text"
+                  placeholder="Search Snowflake databases"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-9 pr-9 py-1.5 text-sm focus:outline-none"
+                />
+                {searchTerm && (
+                  <img
+                    src="/clear-search.svg"
+                    alt="Clear search"
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 cursor-pointer"
+                    onClick={() => setSearchTerm('')}
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* Tree content area */}
+            <div className="flex-1 min-h-0 overflow-auto relative">
             {isLoading && (
               <div className="absolute inset-0 flex items-center justify-center">
                 <img
-                  src="/snowflake-bug-color-rgb.svg"
+                  src="/snowflake-bug-color.svg"
                   alt="Loading..."
                   className="h-10"
                   style={{
@@ -765,11 +789,11 @@ cat(toJSON(all_items, auto_unbox = TRUE))
                 No databases found
               </div>
             )}
+            </div>
           </div>
-        </div>
 
-        {/* Footer */}
-        <div className="p-4 flex items-center justify-between flex-shrink-0">
+          {/* Footer */}
+          <div className="py-4 pl-4 flex items-center justify-between flex-shrink-0">
           <div className="text-sm text-gray-600">
             <div>{selectedItems.length} item{selectedItems.length !== 1 ? 's' : ''} selected</div>
             <div className="text-xs text-gray-500 mt-1">
@@ -780,18 +804,19 @@ cat(toJSON(all_items, auto_unbox = TRUE))
           <div className="flex gap-4">
             <button
               onClick={onClose}
-              className="w-24 px-4 py-2 bg-white border border-gray-300 rounded-md hover:bg-gray-100"
+              className="w-24 h-8 px-4 bg-white border border-gray-300 rounded-md hover:bg-gray-100 flex items-center justify-center"
             >
               Cancel
             </button>
             <button
               onClick={handleLoad}
               disabled={selectedItems.length === 0}
-              className="w-24 px-4 py-2 bg-[#3686c1] text-white rounded-md hover:bg-[#2a6a9a] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-24 h-8 px-4 bg-[#3686c1] text-white rounded-md hover:bg-[#2a6a9a] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
             >
               Open
             </button>
           </div>
+        </div>
         </div>
       </div>
     </div>
