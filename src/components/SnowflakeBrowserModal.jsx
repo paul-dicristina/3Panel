@@ -729,7 +729,7 @@ cat(toJSON(all_items, auto_unbox = TRUE))
                 />
                 <input
                   type="text"
-                  placeholder="Search Snowflake databases"
+                  placeholder={selectedDataSource === 'snowflake' ? 'Search Snowflake databases' : 'Search Databricks databases'}
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="w-full pl-9 pr-9 py-1.5 text-sm focus:outline-none"
@@ -747,26 +747,28 @@ cat(toJSON(all_items, auto_unbox = TRUE))
 
             {/* Tree content area */}
             <div className="flex-1 min-h-0 overflow-auto relative">
-            {isLoading && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <img
-                  src="/snowflake-bug-color.svg"
-                  alt="Loading..."
-                  className="h-10"
-                  style={{
-                    animation: 'snowflake-pulse 1.5s ease-in-out infinite'
-                  }}
-                />
-              </div>
-            )}
+            {selectedDataSource === 'snowflake' && (
+              <>
+                {isLoading && (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <img
+                      src="/snowflake-bug-color-rgb.svg"
+                      alt="Loading..."
+                      className="h-10"
+                      style={{
+                        animation: 'snowflake-pulse 1.5s ease-in-out infinite'
+                      }}
+                    />
+                  </div>
+                )}
 
-            {error && (
-              <div className="text-red-600 p-4">
-                Error: {error}
-              </div>
-            )}
+                {error && (
+                  <div className="text-red-600 p-4">
+                    Error: {error}
+                  </div>
+                )}
 
-            {!isLoading && !error && treeData.length > 0 && (() => {
+                {!isLoading && !error && treeData.length > 0 && (() => {
               const filteredData = searchTerm
                 ? treeData.filter(node =>
                     node.name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -784,10 +786,12 @@ cat(toJSON(all_items, auto_unbox = TRUE))
               );
             })()}
 
-            {!isLoading && !error && treeData.length === 0 && (
-              <div className="text-gray-500 text-center p-4">
-                No databases found
-              </div>
+                {!isLoading && !error && treeData.length === 0 && (
+                  <div className="text-gray-500 text-center p-4">
+                    No databases found
+                  </div>
+                )}
+              </>
             )}
             </div>
           </div>
