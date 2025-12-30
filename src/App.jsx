@@ -43,7 +43,7 @@ function App() {
   // UI state
   const [viewMode, setViewMode] = useState('explore'); // 'explore' or 'data'
   const [dataFrames, setDataFrames] = useState([]);
-  const [suggestionsEnabled, setSuggestionsEnabled] = useState(false);
+  const [suggestionsEnabled, setSuggestionsEnabled] = useState(true);
   const [autoFormatTabular, setAutoFormatTabular] = useState(true);
   const [showConversationsMenu, setShowConversationsMenu] = useState(false);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
@@ -833,11 +833,22 @@ Please respond with a JSON object in this format:
   };
 
   // Handle suggestion click - populate input field but don't submit
-  const handleSuggestionClick = (suggestion) => {
-    setInputValue(suggestion);
-    // Focus the textarea
-    if (textareaRef.current) {
-      textareaRef.current.focus();
+  const handleSuggestionClick = (suggestion, event) => {
+    // Remove focus from the button to prevent blue outline
+    if (event?.currentTarget) {
+      event.currentTarget.blur();
+    }
+
+    if (event?.shiftKey) {
+      // Shift-click: submit directly
+      handleSendMessage(suggestion);
+    } else {
+      // Normal click: populate input
+      setInputValue(suggestion);
+      // Focus the textarea
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+      }
     }
   };
 
@@ -976,8 +987,9 @@ Please respond with a JSON object in this format:
   };
 
   // Handle sending a message to Claude
-  const handleSendMessage = async () => {
-    if (!inputValue.trim() || isLoading) return;
+  const handleSendMessage = async (messageOverride = null) => {
+    const messageToSend = messageOverride || inputValue.trim();
+    if (!messageToSend || isLoading) return;
 
     // Clear any pending auto-submit timer
     if (autoSubmitTimerRef.current) {
@@ -988,7 +1000,7 @@ Please respond with a JSON object in this format:
     // Trigger submit button animation (will reset when response received)
     setIsSubmitAnimating(true);
 
-    const userMessage = inputValue.trim();
+    const userMessage = messageToSend;
     setInputValue('');
     setIsLoading(true);
 
@@ -1228,14 +1240,17 @@ Please respond with a JSON object in this format:
         {/* Suggestions (if any) */}
         {suggestions.length > 0 && (
           <div className="mt-3 ml-0 max-w-2xl" style={{ fontSize: '10pt' }}>
-            <p className="font-semibold text-gray-700 mb-2">Suggestions for further analysis:</p>
+            <div className="flex items-baseline gap-2 mb-2">
+              <p className="font-semibold text-gray-700">Suggestions:</p>
+              <p className="text-xs text-gray-500 italic">SHIFT click to submit directly</p>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               {suggestions.map((suggestion, index) => {
                 const iconName = getSuggestionIcon(suggestion);
                 return (
                   <button
                     key={index}
-                    onClick={() => handleSuggestionClick(suggestion)}
+                    onClick={(e) => handleSuggestionClick(suggestion, e)}
                     className="suggestion-button flex items-start gap-2 text-left text-blue-600 hover:text-blue-800 hover:underline cursor-pointer p-2"
                   >
                     <img
@@ -1408,17 +1423,18 @@ Please respond with a JSON object in this format:
 
           <div className="flex items-center gap-2 h-full relative">
             <img
-              src="/load-data.png"
+              src="/csv-icon.png"
               alt="Load data"
               className="h-4 cursor-pointer"
               onClick={handleLoadData}
+              title="Load data from file"
             />
             <img
               src="/snowflake-bug-color-rgb.svg"
               alt="Browse Snowflake"
               className="h-4 cursor-pointer"
               onClick={handleOpenSnowflake}
-              title="Browse Snowflake"
+              title="Browse Snowflake databases"
             />
             <img src="/separator.png" alt="" className="h-4" />
             <img
@@ -1426,6 +1442,7 @@ Please respond with a JSON object in this format:
               alt="New conversation"
               className="h-4 cursor-pointer"
               onClick={handleNewConversation}
+              title="Start new conversation"
             />
             <div className="relative conversations-menu-container">
               <img
@@ -1433,6 +1450,7 @@ Please respond with a JSON object in this format:
                 alt="Conversations"
                 className="h-4 cursor-pointer"
                 onClick={handleToggleConversations}
+                title="View conversations"
               />
               {showConversationsMenu && (
                 <div className="absolute top-full left-0 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg p-4 min-w-[200px] z-50">
@@ -1447,6 +1465,7 @@ Please respond with a JSON object in this format:
               alt={suggestionsEnabled ? "Suggestions on" : "Suggestions off"}
               className="h-4 cursor-pointer"
               onClick={() => setSuggestionsEnabled(!suggestionsEnabled)}
+              title={suggestionsEnabled ? "Suggestions enabled (click to disable)" : "Suggestions disabled (click to enable)"}
             />
             <div className="relative options-menu-container">
               <img
@@ -1454,6 +1473,7 @@ Please respond with a JSON object in this format:
                 alt="Options"
                 className="h-4 cursor-pointer"
                 onClick={handleToggleOptions}
+                title="Options menu"
               />
               {showOptionsMenu && (
                 <div className="absolute top-full left-0 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg min-w-[220px] z-50 py-1">
@@ -1517,6 +1537,7 @@ Please respond with a JSON object in this format:
               onClick={handleCreateReport}
               className="flex items-center gap-1 hover:bg-gray-200 rounded transition-colors px-1"
               disabled={messages.length === 0}
+              title="Create new report from conversation"
             >
               <img src="/report.png" alt="New Report" className="h-4" />
               <span className="text-[12px] font-medium text-gray-700">New Report</span>
@@ -1526,6 +1547,7 @@ Please respond with a JSON object in this format:
               onClick={handleToggleFavorite}
               className="w-6 h-6 flex items-center justify-center hover:bg-gray-200 rounded transition-colors"
               disabled={!selectedCardId}
+              title={selectedCardId && favoritedCardIds.has(selectedCardId) ? "Remove from favorites" : "Add to favorites"}
             >
               <img
                 src={selectedCardId && favoritedCardIds.has(selectedCardId) ? "/favorite-on.png" : "/favorite-off.png"}
@@ -1533,15 +1555,24 @@ Please respond with a JSON object in this format:
                 className="w-4 h-4"
               />
             </button>
-            <button className="w-6 h-6 flex items-center justify-center hover:bg-gray-200 rounded transition-colors" disabled={!selectedCardId}>
+            <button
+              className="w-6 h-6 flex items-center justify-center hover:bg-gray-200 rounded transition-colors"
+              disabled={!selectedCardId}
+              title="Copy plot to clipboard"
+            >
               <img src="/copy-plot.png" alt="Copy plot" className="w-4 h-4" />
             </button>
-            <button className="w-6 h-6 flex items-center justify-center hover:bg-gray-200 rounded transition-colors" disabled={!selectedCardId}>
+            <button
+              className="w-6 h-6 flex items-center justify-center hover:bg-gray-200 rounded transition-colors"
+              disabled={!selectedCardId}
+              title="Check code for errors"
+            >
               <img src="/check-code.png" alt="Check code" className="w-4 h-4" />
             </button>
             <button
               onClick={() => setShowApiKeyModal(true)}
               className="px-2 py-0.5 bg-[#edeff0] hover:bg-[#d7dadc] text-[#3a7aaf] border border-[#d7dadc] rounded transition-all text-[10px] font-medium ml-2"
+              title="Update Anthropic API key"
             >
               Update API Key
             </button>

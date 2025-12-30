@@ -338,6 +338,43 @@ Correct: customers
 Or: library(dplyr); as_tibble(customers)
 Wrong: print(customers, n = Inf)
 
+CRITICAL - DISPLAYING PLOTS IN R:
+When creating ggplot2 visualizations, ALWAYS explicitly print the plot to ensure it displays:
+
+CORRECT APPROACH - Explicit print():
+\`\`\`r
+library(ggplot2)
+p <- ggplot(mtcars, aes(x=wt, y=mpg)) +
+  geom_point() +
+  theme_minimal()
+print(p)  # ALWAYS print the plot!
+\`\`\`
+
+OR make the plot the LAST expression in the code block:
+\`\`\`r
+library(ggplot2)
+# Do any data prep first
+data_subset <- subset(mtcars, cyl == 6)
+
+# Create and print plot as LAST expression
+ggplot(data_subset, aes(x=wt, y=mpg)) +
+  geom_point() +
+  theme_minimal()
+# Nothing after this!
+\`\`\`
+
+WRONG APPROACH - Plot not printed or code continues after plot:
+\`\`\`r
+library(ggplot2)
+ggplot(mtcars, aes(x=wt, y=mpg)) + geom_point()  # Created but not printed
+cat("Some text")  # This runs after, so plot doesn't display!
+\`\`\`
+
+WHY THIS MATTERS:
+- In scripted R execution, ggplot objects must be explicitly printed or be the last expression
+- If ANY code runs after creating the plot, it won't automatically display
+- Always use print() or ensure the plot is the final expression
+
 CRITICAL - WORKING WITH EXTERNAL DATA:
 When working with external CSV files or URLs, you MUST follow this exact pattern:
 
@@ -541,7 +578,10 @@ CRITICAL REQUIREMENTS FOR SUGGESTIONS:
 5. Base suggestions ONLY on columns/variables that have been explicitly shown or used in the conversation
 6. Do NOT assume the dataset contains additional columns that weren't mentioned
 7. If you're unsure what columns exist, suggest exploring the dataset structure first (e.g., "Show column names and structure of mtcars")
-8. If no dataset was referenced in the request, do NOT include suggestions
+8. WHEN TO PROVIDE SUGGESTIONS:
+   - Provide suggestions when the user explicitly names a dataset (e.g., "mtcars", "iris_data", "lex")
+   - ALSO provide suggestions when the user says "the dataset", "this data", "the data", etc. and you are actively working with a dataset from the conversation history
+   - Do NOT provide suggestions for general questions or tasks not involving dataset analysis (e.g., "how do I connect to Snowflake?")
 
 GOOD EXAMPLES OF SPECIFIC, ACTIONABLE SUGGESTIONS:
 ✓ "Create a scatter plot of hp vs mpg from mtcars with points colored by cyl"

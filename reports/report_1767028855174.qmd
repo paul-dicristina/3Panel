@@ -1,0 +1,24 @@
+---
+title: "lex Dataset Analysis"
+date: "12/29/2025"
+format:
+  html:
+    theme: default
+    toc: false
+    embed-resources: true
+---
+
+This report presents 3 key findings from an analysis of lex. The analysis addressed 4 questions focused on exploring patterns, relationships, and insights within the data.
+
+*Interactive table available in HTML version*
+
+The life expectancy dataset has been transformed from wide to long format, now containing 58,394 observations across 4 variables: country code, country name, year, and life expectancy. The data spans from 1800 onwards, with early records for Afghanistan showing life expectancy around 28 years.
+
+*Interactive table available in HTML version*
+
+As of the year 2100 (projected data), Singapore leads global life expectancy at 94.8 years, followed closely by Japan at 94.6 years. The top 10 countries are predominantly wealthy nations from Europe and Asia, with life expectancies ranging from 92.8 to 94.8 years.
+
+![](plot_1767028855174_2_0.svg)
+
+This line chart tracks life expectancy over time for the 10 countries with the highest projected life expectancy in 2100. The visualization reveals dramatic improvements in life expectancy across all countries, with trajectories converging toward the 90+ year range, though countries started from vastly different baselines in earlier centuries.
+
