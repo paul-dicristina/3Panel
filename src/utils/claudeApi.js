@@ -11,9 +11,12 @@ const PROXY_API_URL = 'http://localhost:3001/api/chat';
  * @param {string} apiKey - The Anthropic API key
  * @param {string} userMessage - The user's prompt
  * @param {Array} conversationHistory - Previous messages in the conversation
+ * @param {boolean} suggestionsEnabled - Whether suggestions are enabled
+ * @param {Array} recentPlots - Recent plot images for Claude's vision
+ * @param {Array} columnMetadata - Column schema information from current dataset
  * @returns {Promise<Object>} Response containing text and any R code blocks
  */
-export async function sendMessageToClaude(apiKey, userMessage, conversationHistory = [], suggestionsEnabled = false, recentPlots = []) {
+export async function sendMessageToClaude(apiKey, userMessage, conversationHistory = [], suggestionsEnabled = false, recentPlots = [], columnMetadata = null) {
   try {
     // Call the proxy server instead of Anthropic API directly
     const response = await fetch(PROXY_API_URL, {
@@ -25,6 +28,7 @@ export async function sendMessageToClaude(apiKey, userMessage, conversationHisto
         apiKey: apiKey,
         suggestionsEnabled: suggestionsEnabled,
         recentPlots: recentPlots,  // Include plot images for Claude's vision
+        columnMetadata: columnMetadata,  // Include dataset schema
         messages: [
           ...conversationHistory,
           {
@@ -77,10 +81,14 @@ export async function sendMessageToClaude(apiKey, userMessage, conversationHisto
     // Extract reactive component specs from the response
     const reactiveComponents = extractReactiveComponents(assistantMessage);
 
+    // Get suggestions from response if available (from server parsing)
+    const suggestions = result.suggestions || null;
+
     return {
       text: assistantMessage,
       rCodeBlocks,
       reactiveComponents,
+      suggestions,
       fullResponse: data
     };
   } catch (error) {

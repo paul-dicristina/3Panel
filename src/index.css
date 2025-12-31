@@ -167,3 +167,94 @@ code {
 .submit-button-animating .square-icon {
   animation: square-appear 800ms ease-out forwards;
 }
+
+/* Interactive Suggestion Styling */
+.interactive-value {
+  position: relative;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: #3686c1;
+  text-underline-offset: 3px;
+  color: #3686c1;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0 2px;
+  border-radius: 2px;
+  transition: background-color 0.2s ease;
+}
+
+.interactive-value:hover {
+  background-color: rgba(54, 134, 193, 0.1);
+}
+
+.options-popup {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: white;
+  border: 1px solid #d7dadc;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  min-width: 150px;
+  max-width: 250px;
+  padding: 4px;
+  animation: popup-appear 0.15s ease-out;
+}
+
+@keyframes popup-appear {
+  0% {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.options-header {
+  font-size: 10px;
+  font-weight: 600;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 6px 8px 4px;
+  border-bottom: 1px solid #e5e7eb;
+  margin-bottom: 2px;
+}
+
+.options-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.option-item {
+  padding: 6px 8px;
+  cursor: pointer;
+  font-size: 11pt;
+  color: #374151;
+  border-radius: 4px;
+  margin: 2px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: background-color 0.15s ease;
+}
+
+.option-item:hover {
+  background-color: #f3f4f6;
+}
+
+.option-item.selected {
+  background-color: rgba(54, 134, 193, 0.1);
+  color: #3686c1;
+  font-weight: 500;
+}
+
+.option-item .checkmark {
+  color: #3686c1;
+  font-size: 12px;
+  margin-left: 8px;
+}

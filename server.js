@@ -79,7 +79,7 @@ function checkQuartoAvailable() {
  */
 app.post('/api/chat', async (req, res) => {
   try {
-    const { apiKey, messages, suggestionsEnabled, recentPlots } = req.body;
+    const { apiKey, messages, suggestionsEnabled, recentPlots, columnMetadata } = req.body;
 
     if (!apiKey) {
       return res.status(400).json({
@@ -97,6 +97,23 @@ app.post('/api/chat', async (req, res) => {
     const anthropic = new Anthropic({
       apiKey: apiKey,
     });
+
+    // Build column schema info if available
+    let schemaInfo = '';
+    if (columnMetadata && columnMetadata.length > 0) {
+      const numericColumns = columnMetadata.filter(c => c.type === 'numeric').map(c => c.name);
+      const categoricalColumnsWithValues = columnMetadata
+        .filter(c => c.type === 'categorical' && c.values && c.values.length > 0)
+        .map(c => `${c.name}: [${c.values.join(', ')}]`);
+
+      schemaInfo = `\n\nCURRENT DATASET SCHEMA:
+Numeric columns: ${numericColumns.join(', ') || 'none'}
+Categorical columns with values:
+${categoricalColumnsWithValues.map(c => `  - ${c}`).join('\n') || 'none'}
+
+⚠️  CRITICAL: When writing R code that references column names, you MUST use the EXACT column names shown above.
+DO NOT infer, guess, or fabricate column names. For example, if you see "TARGET: [Iris-setosa, ...]", the column name is TARGET, NOT "SPECIES" or any other name you might infer from the values.`;
+    }
 
     // System prompt for data analysis assistant
     let systemPrompt = `You are a helpful data analysis assistant. When users ask you to analyze data, load files, or create visualizations, you should:
@@ -726,7 +743,7 @@ WHEN TO USE:
 WHEN NOT TO USE:
 - Simple static visualizations
 - One-time analyses
-- Complex multi-step workflows`;
+- Complex multi-step workflows${schemaInfo}`;
 
     // Format messages with vision content blocks if plots are included
     let formattedMessages = messages;
@@ -814,11 +831,39 @@ WHEN NOT TO USE:
       messages: formattedMessages
     });
 
-    // Return the response
-    res.json({
+    // Extract and parse suggestions if they exist
+    let parsedSuggestions = null;
+    if (suggestionsEnabled && message.content && message.content[0] && message.content[0].text) {
+      const responseText = message.content[0].text;
+      const suggestionsMatch = responseText.match(/\*\*Suggestions for further analysis:\*\*\s*([\s\S]*?)(?:\n\n|$)/);
+
+      if (suggestionsMatch) {
+        const suggestionsText = suggestionsMatch[1];
+        const suggestionLines = suggestionsText
+          .split('\n')
+          .filter(line => line.trim().startsWith('-'))
+          .map(line => line.replace(/^-\s*/, '').trim())
+          .filter(s => s.length > 0);
+
+        // For now, return as simple strings - interactive metadata would require
+        // knowing the dataset schema, which we don't have in regular chat
+        parsedSuggestions = suggestionLines;
+
+        console.log('[/api/chat] Extracted', parsedSuggestions.length, 'suggestions from response');
+      }
+    }
+
+    // Return the response with parsed suggestions
+    const response = {
       success: true,
       data: message
-    });
+    };
+
+    if (parsedSuggestions && parsedSuggestions.length > 0) {
+      response.suggestions = parsedSuggestions;
+    }
+
+    res.json(response);
 
   } catch (error) {
     console.error('Error calling Claude API:', error);
@@ -1414,7 +1459,25 @@ if (length(year_cols) > 0) {
   cat("   Suggest using pivot_longer() to reshape these columns into rows\\n")
 } else {
   cat("✓ Column names appear to be proper variable names\\n")
-}`;
+}
+cat("\\n")
+
+# Extract unique values for categorical columns (for interactive suggestions)
+cat("Categorical column values:\\n")
+for (col_name in names(${baseFilename})) {
+  col_data <- ${baseFilename}[[col_name]]
+  # Check if column is character or factor (categorical)
+  if (is.character(col_data) || is.factor(col_data)) {
+    unique_vals <- unique(na.omit(col_data))
+    n_unique <- length(unique_vals)
+    # Only show if there are 2-20 unique values (truly categorical)
+    if (n_unique >= 2 && n_unique <= 20) {
+      cat(paste0("$ ", col_name, ": [", paste(head(unique_vals, 15), collapse = ", "),
+                 if(n_unique > 15) "..." else "", "]\\n"))
+    }
+  }
+}
+cat("\\n")`;
 
     // ==== Execute the diagnostic R code ====
     const timestamp = Date.now();
@@ -1466,6 +1529,49 @@ save.image(workspace_path)
       });
     }
 
+    // ==== Extract column metadata from R output for interactive suggestions ====
+    let columnMetadata = [];
+    try {
+      // Parse column types from str() output
+      const structureMatch = rOutput.stdout.match(/Data structure:[\s\S]*?(?=\n\n|$)/);
+      if (structureMatch) {
+        const structureText = structureMatch[0];
+        // Format: $ colname : type value...
+        const colMatches = structureText.matchAll(/\$ (\w+)\s*:\s*(\w+)/g);
+        for (const match of colMatches) {
+          const [, colName, colType] = match;
+          // Categorize as numeric or categorical
+          const isNumeric = ['num', 'int', 'dbl', 'numeric', 'integer'].includes(colType.toLowerCase());
+          columnMetadata.push({
+            name: colName,
+            type: isNumeric ? 'numeric' : 'categorical',
+            values: []  // Will populate from categorical values section
+          });
+        }
+      }
+
+      // Parse categorical column values
+      const categoricalMatch = rOutput.stdout.match(/Categorical column values:[\s\S]*?(?=\n\n|$)/);
+      if (categoricalMatch) {
+        const categoricalText = categoricalMatch[0];
+        // Format: $ colname: [value1, value2, value3]
+        const valueMatches = categoricalText.matchAll(/\$ (\w+): \[(.*?)\]/g);
+        for (const match of valueMatches) {
+          const [, colName, valuesStr] = match;
+          // Find this column in metadata and add values
+          const col = columnMetadata.find(c => c.name === colName);
+          if (col) {
+            // Parse comma-separated values, trim whitespace, remove "..." if present
+            col.values = valuesStr.split(',')
+              .map(v => v.trim())
+              .filter(v => v && v !== '...');
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Failed to extract column metadata:', e);
+    }
+
     // ==== PHASE 2: Have Claude analyze the actual output and write report ====
     const jsonSchema = suggestionsEnabled ? `{
   "structure": "Text describing exact dimensions and time range if applicable",
@@ -1473,7 +1579,30 @@ save.image(workspace_path)
   "missingData": "Text describing missing data patterns and counts",
   "subject": "Text describing what the dataset is about",
   "insights": "Text describing analysis potential and data completeness",
-  "suggestions": ["Array of 2-4 specific analysis suggestions"]
+  "suggestions": [
+    {
+      "text": "Complete suggestion text",
+      "interactive": {
+        "value": "Iris-setosa",
+        "context": "species",
+        "options": ["Iris-setosa", "Iris-versicolor", "Iris-virginica"]
+      }
+    }
+  ]
+}
+
+CRITICAL REQUIREMENTS:
+1. Each suggestion MUST be an object with "text" field, NOT a plain string!
+2. For interactive: provide ONLY the categorical value, context, and options
+   - "value": the exact categorical value that appears in your suggestion text (e.g., "Iris-setosa")
+   - "context": brief label like "species", "country", "year"
+   - "options": array of alternative values from that categorical column
+   - DO NOT provide "start" or "end" - the server will calculate positions automatically
+
+Examples:
+✓ CORRECT: {"text": "Create a box plot of SEPAL_LENGTH_CM for Iris-setosa", "interactive": {"value": "Iris-setosa", "context": "species", "options": ["Iris-setosa", "Iris-versicolor", "Iris-virginica"]}}
+✗ WRONG: Making "species" interactive (that's a column name, not a value!)
+✗ WRONG: Making "distributions" interactive (that's not a categorical value!)
 }` : `{
   "structure": "Text describing exact dimensions and time range if applicable",
   "tidyFormat": "Text describing whether dataset is tidy and what needs to be reshaped",
@@ -1482,9 +1611,24 @@ save.image(workspace_path)
   "insights": "Text describing analysis potential and data completeness"
 }`;
 
+    // Build column list for the prompt
+    const numericColumns = columnMetadata.filter(c => c.type === 'numeric').map(c => c.name);
+    const categoricalColumnsWithValues = columnMetadata
+      .filter(c => c.type === 'categorical' && c.values.length > 0)
+      .map(c => `${c.name}: [${c.values.join(', ')}]`);
+
+    const columnInfo = columnMetadata.length > 0
+      ? `\n\nDATASET SCHEMA (for interactive suggestions):
+Numeric columns: ${numericColumns.join(', ') || 'none'}
+Categorical columns with values (format is COLUMN_NAME: [values]):
+${categoricalColumnsWithValues.map(c => `  - ${c}`).join('\n') || 'none'}
+
+CRITICAL: Use the EXACT column names shown above. For example, if you see "TARGET: [Iris-setosa, ...]", use TARGET as the column name, NOT "SPECIES" or any other inferred name.`
+      : '';
+
     let reportSystemPrompt = `You are a data analysis assistant. You have just executed R code to load and examine a dataset.
 
-The user loaded a file called "${filename}". The R diagnostic code has been executed and you can see the ACTUAL output below.
+The user loaded a file called "${filename}". The R diagnostic code has been executed and you can see the ACTUAL output below.${columnInfo}
 
 Based on the ACTUAL R output, write a comprehensive report in JSON format with these sections:
 
@@ -1494,7 +1638,34 @@ For each section:
 - Write 3-5 sentences in paragraph format
 - Be concise and specific
 - Base your report ENTIRELY on the R output shown below
-${suggestionsEnabled ? '\n- For suggestions: provide 2-4 specific, actionable prompts. If data is NOT in tidy format, FIRST suggestion must be a specific prompt to convert it using pivot_longer().' : ''}
+${suggestionsEnabled ? `
+- For suggestions: provide 2-4 specific, actionable prompts for CHART/PLOT analysis only
+- If data is NOT in tidy format, FIRST suggestion must be a specific prompt to convert it using pivot_longer()
+- Each suggestion MUST be fully executable with specific column names
+- For plot suggestions, you MAY mark ONE categorical VALUE as interactive:
+  * Include a specific categorical value in your suggestion (e.g., "for Iris-setosa" or "in Canada")
+  * ONLY make actual categorical VALUES interactive (like "Iris-setosa"), NEVER column names, NEVER other words
+  * Provide the interactive object with ONLY three fields:
+    - "value": the exact categorical value text (e.g., "Iris-setosa")
+    - "context": brief label (e.g., "species", "country", "year")
+    - "options": array of alternative values from the schema above
+  * DO NOT calculate character positions - the server does this automatically
+
+  CORRECT EXAMPLE:
+  {
+    "text": "Create a box plot of SEPAL_LENGTH_CM for Iris-setosa",
+    "interactive": {
+      "value": "Iris-setosa",
+      "context": "species",
+      "options": ["Iris-setosa", "Iris-versicolor", "Iris-virginica"]
+    }
+  }
+
+  WRONG EXAMPLES:
+  ✗ "value": "species" - this is a column name, not a categorical value!
+  ✗ "value": "distributions" - this is not a categorical value!
+
+- Most suggestions (2-3 out of 4) should NOT have interactive elements` : ''}
 
 SPECIAL FORMATTING for "structure" section:
 - After your paragraph describing the structure, add TWO newlines, then add a line that starts with "Columns:" followed by a newline
@@ -1506,7 +1677,8 @@ SPECIAL FORMATTING for "structure" section:
 CRITICAL REQUIREMENTS:
 - Return ONLY the raw JSON object - no markdown code blocks, no \`\`\`json\`\`\`, no extra text
 - All newlines in strings must be escaped as \\n
-- All string values must use proper JSON escaping`;
+- All string values must use proper JSON escaping
+- Suggestions array contains objects (with text and optional interactive), not plain strings`;
 
     const reportPrompt = `Here is the R output from loading and examining the dataset:
 
@@ -1566,6 +1738,76 @@ Write your comprehensive report in JSON format based on this actual output.`;
       };
       suggestions = reportData.suggestions || [];
 
+      // Validate and auto-calculate positions for interactive suggestions
+      if (suggestions && suggestions.length > 0) {
+        // Get all categorical values from metadata for validation
+        const allCategoricalValues = [];
+        for (const col of columnMetadata) {
+          if (col.type === 'categorical' && col.values && col.values.length > 0) {
+            allCategoricalValues.push(...col.values);
+          }
+        }
+
+        // Get all valid column names for validation
+        const allColumnNames = columnMetadata.map(c => c.name);
+        console.log('[CSV] Valid column names:', allColumnNames);
+        console.log('[CSV] All categorical values for validation:', allCategoricalValues);
+
+        for (let i = 0; i < suggestions.length; i++) {
+          const sug = suggestions[i];
+
+          // Validate column names in suggestion text
+          // Look for uppercase words or words with underscores that might be column names
+          const potentialColumnNames = sug.text.match(/\b[A-Z][A-Z0-9_]{2,}\b/g) || [];
+          const invalidColumnNames = potentialColumnNames.filter(name =>
+            !allColumnNames.includes(name) &&
+            !allCategoricalValues.includes(name) // Not a categorical value either
+          );
+
+          if (invalidColumnNames.length > 0) {
+            console.log(`⚠️  [CSV] Suggestion ${i} contains HALLUCINATED column names: ${invalidColumnNames.join(', ')}`);
+            console.log(`   Valid columns are: ${allColumnNames.join(', ')}`);
+            console.log(`   Suggestion text: "${sug.text}"`);
+            console.log(`   ❌ REMOVING suggestion due to hallucinated column names`);
+            // Mark for removal
+            suggestions[i] = null;
+            continue;
+          }
+
+          if (sug.interactive) {
+            const { value } = sug.interactive;
+
+            console.log(`[CSV] Suggestion ${i}: Checking interactive value "${value}"`);
+            console.log(`  - Is "${value}" a categorical value?`, allCategoricalValues.includes(value));
+
+            // Check if value is valid
+            if (!allCategoricalValues.includes(value)) {
+              console.log(`  ✗ INVALID - not a categorical value, removing`);
+              delete sug.interactive;
+              continue;
+            }
+
+            // Find the value in the suggestion text
+            const valueIndex = sug.text.indexOf(value);
+            if (valueIndex === -1) {
+              console.log(`  ✗ INVALID - value "${value}" not found in text, removing`);
+              delete sug.interactive;
+              continue;
+            }
+
+            // Calculate positions and add them
+            sug.interactive.start = valueIndex;
+            sug.interactive.end = valueIndex + value.length;
+
+            console.log(`  ✓ Valid - added positions ${sug.interactive.start}-${sug.interactive.end}`);
+          }
+        }
+
+        // Filter out null suggestions (those with invalid column names)
+        suggestions = suggestions.filter(s => s !== null);
+        console.log(`[CSV] After validation: ${suggestions.length} suggestions remain`);
+      }
+
       console.log('Successfully parsed report sections');
     } catch (e) {
       console.error('Failed to parse report JSON:', e);
@@ -1613,7 +1855,8 @@ Write your comprehensive report in JSON format based on this actual output.`;
       error: filteredError,
       suggestions: suggestions,
       filename: filename,
-      variableName: baseFilename  // Add the sanitized R variable name
+      variableName: baseFilename,  // Add the sanitized R variable name
+      columnMetadata: columnMetadata  // Include schema for future chat requests
     });
 
   } catch (error) {
@@ -1705,7 +1948,25 @@ if (length(year_cols) > 0) {
   cat("   Suggest using pivot_longer() to reshape these columns into rows\\n")
 } else {
   cat("✓ Column names appear to be proper variable names\\n")
-}`;
+}
+cat("\\n")
+
+# Extract unique values for categorical columns (for interactive suggestions)
+cat("Categorical column values:\\n")
+for (col_name in names(${varName})) {
+  col_data <- ${varName}[[col_name]]
+  # Check if column is character or factor (categorical)
+  if (is.character(col_data) || is.factor(col_data)) {
+    unique_vals <- unique(na.omit(col_data))
+    n_unique <- length(unique_vals)
+    # Only show if there are 2-20 unique values (truly categorical)
+    if (n_unique >= 2 && n_unique <= 20) {
+      cat(paste0("$ ", col_name, ": [", paste(head(unique_vals, 15), collapse = ", "),
+                 if(n_unique > 15) "..." else "", "]\\n"))
+    }
+  }
+}
+cat("\\n")`;
 
     // ==== Execute the diagnostic R code ====
     const timestamp = Date.now();
@@ -1754,6 +2015,49 @@ save.image(workspace_path)
       });
     }
 
+    // ==== Extract column metadata from R output for interactive suggestions ====
+    let columnMetadata = [];
+    try {
+      // Parse column types from str() output
+      const structureMatch = rOutput.stdout.match(/Data structure:[\s\S]*?(?=\n\n|$)/);
+      if (structureMatch) {
+        const structureText = structureMatch[0];
+        // Format: $ colname : type value...
+        const colMatches = structureText.matchAll(/\$ (\w+)\s*:\s*(\w+)/g);
+        for (const match of colMatches) {
+          const [, colName, colType] = match;
+          // Categorize as numeric or categorical
+          const isNumeric = ['num', 'int', 'dbl', 'numeric', 'integer'].includes(colType.toLowerCase());
+          columnMetadata.push({
+            name: colName,
+            type: isNumeric ? 'numeric' : 'categorical',
+            values: []  // Will populate from categorical values section
+          });
+        }
+      }
+
+      // Parse categorical column values
+      const categoricalMatch = rOutput.stdout.match(/Categorical column values:[\s\S]*?(?=\n\n|$)/);
+      if (categoricalMatch) {
+        const categoricalText = categoricalMatch[0];
+        // Format: $ colname: [value1, value2, value3]
+        const valueMatches = categoricalText.matchAll(/\$ (\w+): \[(.*?)\]/g);
+        for (const match of valueMatches) {
+          const [, colName, valuesStr] = match;
+          // Find this column in metadata and add values
+          const col = columnMetadata.find(c => c.name === colName);
+          if (col) {
+            // Parse comma-separated values, trim whitespace, remove "..." if present
+            col.values = valuesStr.split(',')
+              .map(v => v.trim())
+              .filter(v => v && v !== '...');
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Failed to extract column metadata:', e);
+    }
+
     // ==== PHASE 2: Have Claude analyze the actual output and write report ====
     const jsonSchema = suggestionsEnabled ? `{
   "structure": "Text describing exact dimensions and time range if applicable",
@@ -1761,7 +2065,30 @@ save.image(workspace_path)
   "missingData": "Text describing missing data patterns and counts",
   "subject": "Text describing what the dataset is about",
   "insights": "Text describing analysis potential and data completeness",
-  "suggestions": ["Array of 2-4 specific analysis suggestions"]
+  "suggestions": [
+    {
+      "text": "Complete suggestion text",
+      "interactive": {
+        "value": "Iris-setosa",
+        "context": "species",
+        "options": ["Iris-setosa", "Iris-versicolor", "Iris-virginica"]
+      }
+    }
+  ]
+}
+
+CRITICAL REQUIREMENTS:
+1. Each suggestion MUST be an object with "text" field, NOT a plain string!
+2. For interactive: provide ONLY the categorical value, context, and options
+   - "value": the exact categorical value that appears in your suggestion text (e.g., "Iris-setosa")
+   - "context": brief label like "species", "country", "year"
+   - "options": array of alternative values from that categorical column
+   - DO NOT provide "start" or "end" - the server will calculate positions automatically
+
+Examples:
+✓ CORRECT: {"text": "Create a box plot of SEPAL_LENGTH_CM for Iris-setosa", "interactive": {"value": "Iris-setosa", "context": "species", "options": ["Iris-setosa", "Iris-versicolor", "Iris-virginica"]}}
+✗ WRONG: Making "species" interactive (that's a column name, not a value!)
+✗ WRONG: Making "distributions" interactive (that's not a categorical value!)
 }` : `{
   "structure": "Text describing exact dimensions and time range if applicable",
   "tidyFormat": "Text describing whether dataset is tidy and what needs to be reshaped",
@@ -1770,9 +2097,24 @@ save.image(workspace_path)
   "insights": "Text describing analysis potential and data completeness"
 }`;
 
+    // Build column list for the prompt
+    const numericColumns = columnMetadata.filter(c => c.type === 'numeric').map(c => c.name);
+    const categoricalColumnsWithValues = columnMetadata
+      .filter(c => c.type === 'categorical' && c.values.length > 0)
+      .map(c => `${c.name}: [${c.values.join(', ')}]`);
+
+    const columnInfo = columnMetadata.length > 0
+      ? `\n\nDATASET SCHEMA (for interactive suggestions):
+Numeric columns: ${numericColumns.join(', ') || 'none'}
+Categorical columns with values (format is COLUMN_NAME: [values]):
+${categoricalColumnsWithValues.map(c => `  - ${c}`).join('\n') || 'none'}
+
+CRITICAL: Use the EXACT column names shown above. For example, if you see "TARGET: [Iris-setosa, ...]", use TARGET as the column name, NOT "SPECIES" or any other inferred name.`
+      : '';
+
     let reportSystemPrompt = `You are a data analysis assistant. You have just executed R code to load and examine a Snowflake table.
 
-The user loaded a Snowflake table "${database}.${schema}.${tableName}". The R diagnostic code has been executed and you can see the ACTUAL output below.
+The user loaded a Snowflake table "${database}.${schema}.${tableName}". The R diagnostic code has been executed and you can see the ACTUAL output below.${columnInfo}
 
 Based on the ACTUAL R output, write a comprehensive report in JSON format with these sections:
 
@@ -1782,7 +2124,34 @@ For each section:
 - Write 3-5 sentences in paragraph format
 - Be concise and specific
 - Base your report ENTIRELY on the R output shown below
-${suggestionsEnabled ? '\n- For suggestions: provide 2-4 specific, actionable prompts. If data is NOT in tidy format, FIRST suggestion must be a specific prompt to convert it using pivot_longer().' : ''}
+${suggestionsEnabled ? `
+- For suggestions: provide 2-4 specific, actionable prompts for CHART/PLOT analysis only
+- If data is NOT in tidy format, FIRST suggestion must be a specific prompt to convert it using pivot_longer()
+- Each suggestion MUST be fully executable with specific column names
+- For plot suggestions, you MAY mark ONE categorical VALUE as interactive:
+  * Include a specific categorical value in your suggestion (e.g., "for Iris-setosa" or "in Canada")
+  * ONLY make actual categorical VALUES interactive (like "Iris-setosa"), NEVER column names, NEVER other words
+  * Provide the interactive object with ONLY three fields:
+    - "value": the exact categorical value text (e.g., "Iris-setosa")
+    - "context": brief label (e.g., "species", "country", "year")
+    - "options": array of alternative values from the schema above
+  * DO NOT calculate character positions - the server does this automatically
+
+  CORRECT EXAMPLE:
+  {
+    "text": "Create a box plot of SEPAL_LENGTH_CM for Iris-setosa",
+    "interactive": {
+      "value": "Iris-setosa",
+      "context": "species",
+      "options": ["Iris-setosa", "Iris-versicolor", "Iris-virginica"]
+    }
+  }
+
+  WRONG EXAMPLES:
+  ✗ "value": "species" - this is a column name, not a categorical value!
+  ✗ "value": "distributions" - this is not a categorical value!
+
+- Most suggestions (2-3 out of 4) should NOT have interactive elements` : ''}
 
 SPECIAL FORMATTING for "structure" section:
 - After your paragraph describing the structure, add TWO newlines, then add a line that starts with "Columns:" followed by a newline
@@ -1794,7 +2163,8 @@ SPECIAL FORMATTING for "structure" section:
 CRITICAL REQUIREMENTS:
 - Return ONLY the raw JSON object - no markdown code blocks, no \`\`\`json\`\`\`, no extra text
 - All newlines in strings must be escaped as \\n
-- All string values must use proper JSON escaping`;
+- All string values must use proper JSON escaping
+- Suggestions array contains objects (with text and optional interactive), not plain strings`;
 
     const reportPrompt = `Here is the R output from loading and examining the Snowflake table:
 
@@ -1858,6 +2228,76 @@ Write your comprehensive report in JSON format based on this actual output.`;
       };
       suggestions = reportData.suggestions || [];
 
+      // Validate and auto-calculate positions for interactive suggestions
+      if (suggestions && suggestions.length > 0) {
+        // Get all categorical values from metadata for validation
+        const allCategoricalValues = [];
+        for (const col of columnMetadata) {
+          if (col.type === 'categorical' && col.values && col.values.length > 0) {
+            allCategoricalValues.push(...col.values);
+          }
+        }
+
+        // Get all valid column names for validation
+        const allColumnNames = columnMetadata.map(c => c.name);
+        console.log('[SNOWFLAKE] Valid column names:', allColumnNames);
+        console.log('[SNOWFLAKE] All categorical values for validation:', allCategoricalValues);
+
+        for (let i = 0; i < suggestions.length; i++) {
+          const sug = suggestions[i];
+
+          // Validate column names in suggestion text
+          // Look for uppercase words or words with underscores that might be column names
+          const potentialColumnNames = sug.text.match(/\b[A-Z][A-Z0-9_]{2,}\b/g) || [];
+          const invalidColumnNames = potentialColumnNames.filter(name =>
+            !allColumnNames.includes(name) &&
+            !allCategoricalValues.includes(name) // Not a categorical value either
+          );
+
+          if (invalidColumnNames.length > 0) {
+            console.log(`⚠️  [SNOWFLAKE] Suggestion ${i} contains HALLUCINATED column names: ${invalidColumnNames.join(', ')}`);
+            console.log(`   Valid columns are: ${allColumnNames.join(', ')}`);
+            console.log(`   Suggestion text: "${sug.text}"`);
+            console.log(`   ❌ REMOVING suggestion due to hallucinated column names`);
+            // Mark for removal
+            suggestions[i] = null;
+            continue;
+          }
+
+          if (sug.interactive) {
+            const { value } = sug.interactive;
+
+            console.log(`[SNOWFLAKE] Suggestion ${i}: Checking interactive value "${value}"`);
+            console.log(`  - Is "${value}" a categorical value?`, allCategoricalValues.includes(value));
+
+            // Check if value is valid
+            if (!allCategoricalValues.includes(value)) {
+              console.log(`  ✗ INVALID - not a categorical value, removing`);
+              delete sug.interactive;
+              continue;
+            }
+
+            // Find the value in the suggestion text
+            const valueIndex = sug.text.indexOf(value);
+            if (valueIndex === -1) {
+              console.log(`  ✗ INVALID - value "${value}" not found in text, removing`);
+              delete sug.interactive;
+              continue;
+            }
+
+            // Calculate positions and add them
+            sug.interactive.start = valueIndex;
+            sug.interactive.end = valueIndex + value.length;
+
+            console.log(`  ✓ Valid - added positions ${sug.interactive.start}-${sug.interactive.end}`);
+          }
+        }
+
+        // Filter out null suggestions (those with invalid column names)
+        suggestions = suggestions.filter(s => s !== null);
+        console.log(`[SNOWFLAKE] After validation: ${suggestions.length} suggestions remain`);
+      }
+
       console.log('Report sections created:', Object.keys(reportSections));
       console.log('Structure length:', reportSections.structure?.length || 0);
       console.log('Suggestions count:', suggestions.length);
@@ -1911,7 +2351,8 @@ Write your comprehensive report in JSON format based on this actual output.`;
       error: filteredError,
       suggestions: suggestions,
       tableName: `${database}.${schema}.${tableName}`,
-      variableName: varName
+      variableName: varName,
+      columnMetadata: columnMetadata  // Include schema for future chat requests
     });
 
   } catch (error) {

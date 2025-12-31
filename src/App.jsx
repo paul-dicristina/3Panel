@@ -8,6 +8,7 @@ import ApiKeyModal from './components/ApiKeyModal';
 import CodeCard from './components/CodeCard';
 import DatasetReport from './components/DatasetReport';
 import SnowflakeBrowserModal from './components/SnowflakeBrowserModal';
+import InteractiveSuggestion from './components/InteractiveSuggestion';
 import { sendMessageToClaude } from './utils/claudeApi';
 import { executeRCode } from './utils/rExecutor';
 
@@ -45,6 +46,7 @@ function App() {
   const [dataFrames, setDataFrames] = useState([]);
   const [suggestionsEnabled, setSuggestionsEnabled] = useState(true);
   const [autoFormatTabular, setAutoFormatTabular] = useState(true);
+  const [columnMetadata, setColumnMetadata] = useState(null); // Dataset schema for Claude
   const [showConversationsMenu, setShowConversationsMenu] = useState(false);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [favoritedCardIds, setFavoritedCardIds] = useState(new Set());
@@ -72,7 +74,9 @@ function App() {
 
   // Helper function to determine suggestion icon based on content
   const getSuggestionIcon = (suggestion) => {
-    const lowerSuggestion = suggestion.toLowerCase();
+    // Handle both string and object suggestions
+    const suggestionText = typeof suggestion === 'object' ? suggestion.text : suggestion;
+    const lowerSuggestion = suggestionText.toLowerCase();
 
     // Check for pivot_longer transformations
     if (lowerSuggestion.includes('pivot_longer') || lowerSuggestion.includes('pivot longer')) {
@@ -365,7 +369,7 @@ Please respond with a JSON object in this format:
 }`;
 
         console.log('Sending prompt to Claude API...');
-        const claudeResponse = await sendMessageToClaude(apiKey, descriptionsPrompt, []);
+        const claudeResponse = await sendMessageToClaude(apiKey, descriptionsPrompt, [], false, [], null);
         console.log('Claude API response received:', claudeResponse.text.substring(0, 200));
 
         const jsonMatch = claudeResponse.text.match(/\{[\s\S]*"descriptions"[\s\S]*\}/);
@@ -637,6 +641,12 @@ Please respond with a JSON object in this format:
           console.log('reportSections:', result.reportSections);
           console.log('filename:', result.filename);
 
+          // Store column metadata for future chat requests
+          if (result.columnMetadata) {
+            setColumnMetadata(result.columnMetadata);
+            console.log('Column metadata stored:', result.columnMetadata);
+          }
+
           // Create a code card for the diagnostic code
           const diagnosticCard = {
             id: `card-${Date.now()}`,
@@ -751,6 +761,12 @@ Please respond with a JSON object in this format:
 
         console.log('Snowflake load result:', result);
 
+        // Store column metadata for future chat requests
+        if (result.columnMetadata) {
+          setColumnMetadata(result.columnMetadata);
+          console.log('Column metadata stored:', result.columnMetadata);
+        }
+
         // Validate we have report sections
         if (!result.reportSections || Object.keys(result.reportSections).length === 0) {
           throw new Error('No analysis report was generated. The server may have failed to analyze the table.');
@@ -780,6 +796,10 @@ Please respond with a JSON object in this format:
           filename: fullTableName
         };
         console.log('Creating assistant message with reportSections:', assistantMessage.reportSections);
+        console.log('[SNOWFLAKE LOAD] Suggestions received from server:', result.suggestions);
+        console.log('[SNOWFLAKE LOAD] Suggestion count:', result.suggestions?.length);
+        console.log('[SNOWFLAKE LOAD] First suggestion type:', result.suggestions?.length > 0 ? typeof result.suggestions[0] : 'none');
+        console.log('[SNOWFLAKE LOAD] First suggestion value:', result.suggestions?.[0]);
         setMessages(prev => [...prev, assistantMessage]);
 
         // Add the diagnostic card to global cards array
@@ -1028,13 +1048,14 @@ Please respond with a JSON object in this format:
         }
       }
 
-      // Send to Claude API with plot images
+      // Send to Claude API with plot images and column metadata
       const response = await sendMessageToClaude(
         apiKey,
         userMessage,
         messages.map(m => ({ role: m.role, content: m.content })),
         suggestionsEnabled,
-        recentPlots  // Pass recent plots for Claude to see
+        recentPlots,  // Pass recent plots for Claude to see
+        columnMetadata  // Pass dataset schema so Claude knows column names
       );
 
       // Create code cards for any R code blocks
@@ -1050,7 +1071,13 @@ Please respond with a JSON object in this format:
 
       // Strip R code blocks from the displayed message text
       // Matches both ```r and ```R with optional whitespace and content
-      const displayText = response.text.replace(/```[rR]\s*[\s\S]*?```/g, '').trim();
+      let displayText = response.text.replace(/```[rR]\s*[\s\S]*?```/g, '').trim();
+
+      // If we have structured suggestions, also strip the textual suggestions section
+      if (response.suggestions && response.suggestions.length > 0) {
+        // Strip "Suggestions for further analysis:" section and everything after it
+        displayText = displayText.replace(/\*\*Suggestions for further analysis:\*\*[\s\S]*$/g, '').trim();
+      }
 
       // Debug: Log if suggestions are enabled and what the message contains
       console.log('Suggestions enabled:', suggestionsEnabled);
@@ -1063,8 +1090,11 @@ Please respond with a JSON object in this format:
         role: 'assistant',
         content: response.text,  // Keep original for API
         displayContent: displayText,  // Stripped version for display
-        codeCards: newCards  // Attach code cards to this message
+        codeCards: newCards,  // Attach code cards to this message
+        suggestions: response.suggestions || undefined  // Add suggestions if available
       };
+
+      console.log('[handleSendMessage] Assistant message with suggestions:', assistantMessage.suggestions);
       setMessages(prev => [...prev, assistantMessage]);
 
       // Add cards to global cards array
@@ -1162,15 +1192,20 @@ Please respond with a JSON object in this format:
   // Parse suggestions from message content
   const parseSuggestions = (content) => {
     const suggestionsMatch = content.match(/\*\*Suggestions for further analysis:\*\*\s*([\s\S]*?)(?:\n\n|$)/);
-    if (!suggestionsMatch) return { mainContent: content, suggestions: [] };
+    if (!suggestionsMatch) {
+      console.log('[parseSuggestions] No suggestions found in content');
+      return { mainContent: content, suggestions: [] };
+    }
 
     const mainContent = content.replace(/\*\*Suggestions for further analysis:\*\*\s*[\s\S]*$/, '').trim();
     const suggestionsText = suggestionsMatch[1];
     const suggestions = suggestionsText
       .split('\n')
       .filter(line => line.trim().startsWith('-'))
-      .map(line => line.replace(/^-\s*/, '').trim());
+      .map(line => line.replace(/^-\s*/, '').trim())
+      .filter(s => s.length > 0);
 
+    console.log('[parseSuggestions] Found', suggestions.length, 'suggestions:', suggestions);
     return { mainContent, suggestions };
   };
 
@@ -1185,9 +1220,16 @@ Please respond with a JSON object in this format:
     // Otherwise parse them from the content
     const { mainContent, suggestions } = message.role === 'assistant'
       ? (message.suggestions
-          ? { mainContent: contentToDisplay, suggestions: message.suggestions }
+          ? (() => {
+              console.log('[renderMessage] Using suggestions from message object:', message.suggestions);
+              return { mainContent: contentToDisplay, suggestions: message.suggestions };
+            })()
           : parseSuggestions(contentToDisplay))
       : { mainContent: contentToDisplay, suggestions: [] };
+
+    if (suggestions.length > 0) {
+      console.log('[renderMessage] Rendering', suggestions.length, 'suggestions. First suggestion type:', typeof suggestions[0], suggestions[0]);
+    }
 
     return (
       <div key={message.id} className="mb-4">
@@ -1248,18 +1290,12 @@ Please respond with a JSON object in this format:
               {suggestions.map((suggestion, index) => {
                 const iconName = getSuggestionIcon(suggestion);
                 return (
-                  <button
+                  <InteractiveSuggestion
                     key={index}
-                    onClick={(e) => handleSuggestionClick(suggestion, e)}
-                    className="suggestion-button flex items-start gap-2 text-left text-blue-600 hover:text-blue-800 hover:underline cursor-pointer p-2"
-                  >
-                    <img
-                      src={`/${iconName}.svg`}
-                      alt={iconName}
-                      className="w-8 h-8 flex-shrink-0"
-                    />
-                    <span className="break-words">{suggestion}</span>
-                  </button>
+                    suggestion={suggestion}
+                    iconName={iconName}
+                    onSubmit={handleSuggestionClick}
+                  />
                 );
               })}
             </div>
