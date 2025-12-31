@@ -226,7 +226,7 @@ code {
 }
 
 .options-list {
-  max-height: 200px;
+  max-height: 50vh;
   overflow-y: auto;
 }
 

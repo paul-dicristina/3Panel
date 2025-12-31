@@ -1468,12 +1468,11 @@ for (col_name in names(${baseFilename})) {
   col_data <- ${baseFilename}[[col_name]]
   # Check if column is character or factor (categorical)
   if (is.character(col_data) || is.factor(col_data)) {
-    unique_vals <- unique(na.omit(col_data))
+    unique_vals <- sort(unique(na.omit(col_data)))
     n_unique <- length(unique_vals)
-    # Only show if there are 2-20 unique values (truly categorical)
-    if (n_unique >= 2 && n_unique <= 20) {
-      cat(paste0("$ ", col_name, ": [", paste(head(unique_vals, 15), collapse = ", "),
-                 if(n_unique > 15) "..." else "", "]\\n"))
+    # Only show if there are 2-250 unique values (truly categorical)
+    if (n_unique >= 2 && n_unique <= 250) {
+      cat(paste0("$ ", col_name, ": [", paste(unique_vals, collapse = ", "), "]\\n"))
     }
   }
 }
@@ -1555,7 +1554,8 @@ save.image(workspace_path)
       if (categoricalMatch) {
         const categoricalText = categoricalMatch[0];
         // Format: $ colname: [value1, value2, value3]
-        const valueMatches = categoricalText.matchAll(/\$ (\w+): \[(.*?)\]/g);
+        // Use [\s\S]*? instead of .*? to match across newlines
+        const valueMatches = categoricalText.matchAll(/\$ (\w+): \[([\s\S]*?)\]/g);
         for (const match of valueMatches) {
           const [, colName, valuesStr] = match;
           // Find this column in metadata and add values
@@ -1640,7 +1640,7 @@ For each section:
 - Base your report ENTIRELY on the R output shown below
 ${suggestionsEnabled ? `
 - For suggestions: provide 2-4 specific, actionable prompts for CHART/PLOT analysis only
-- If data is NOT in tidy format, FIRST suggestion must be a specific prompt to convert it using pivot_longer()
+- ⚠️ CRITICAL: If data is NOT in tidy format, the FIRST suggestion MUST be a specific prompt to convert it to tidy format using pivot_longer(). This will be ENFORCED by server validation - if data is not tidy and first suggestion is not about conversion, ALL suggestions will be removed.
 - Each suggestion MUST be fully executable with specific column names
 - For plot suggestions, you MAY mark ONE categorical VALUE as interactive:
   * Include a specific categorical value in your suggestion (e.g., "for Iris-setosa" or "in Canada")
@@ -1756,22 +1756,34 @@ Write your comprehensive report in JSON format based on this actual output.`;
         for (let i = 0; i < suggestions.length; i++) {
           const sug = suggestions[i];
 
-          // Validate column names in suggestion text
-          // Look for uppercase words or words with underscores that might be column names
-          const potentialColumnNames = sug.text.match(/\b[A-Z][A-Z0-9_]{2,}\b/g) || [];
-          const invalidColumnNames = potentialColumnNames.filter(name =>
-            !allColumnNames.includes(name) &&
-            !allCategoricalValues.includes(name) // Not a categorical value either
-          );
+          // Check if this is a tidy conversion suggestion
+          const sugTextLower = sug.text.toLowerCase();
+          const isTidyConversion = sugTextLower.includes('tidy') ||
+                                  sugTextLower.includes('pivot') ||
+                                  sugTextLower.includes('reshape');
 
-          if (invalidColumnNames.length > 0) {
-            console.log(`⚠️  [CSV] Suggestion ${i} contains HALLUCINATED column names: ${invalidColumnNames.join(', ')}`);
-            console.log(`   Valid columns are: ${allColumnNames.join(', ')}`);
-            console.log(`   Suggestion text: "${sug.text}"`);
-            console.log(`   ❌ REMOVING suggestion due to hallucinated column names`);
-            // Mark for removal
-            suggestions[i] = null;
-            continue;
+          // Skip column validation for tidy conversion suggestions
+          // (they often reference column ranges like X1800:X2100 that may not exactly match)
+          if (!isTidyConversion) {
+            // Validate column names in suggestion text
+            // Look for uppercase words or words with underscores that might be column names
+            const potentialColumnNames = sug.text.match(/\b[A-Z][A-Z0-9_]{2,}\b/g) || [];
+            const invalidColumnNames = potentialColumnNames.filter(name =>
+              !allColumnNames.includes(name) &&
+              !allCategoricalValues.includes(name) // Not a categorical value either
+            );
+
+            if (invalidColumnNames.length > 0) {
+              console.log(`⚠️  [CSV] Suggestion ${i} contains HALLUCINATED column names: ${invalidColumnNames.join(', ')}`);
+              console.log(`   Valid columns are: ${allColumnNames.join(', ')}`);
+              console.log(`   Suggestion text: "${sug.text}"`);
+              console.log(`   ❌ REMOVING suggestion due to hallucinated column names`);
+              // Mark for removal
+              suggestions[i] = null;
+              continue;
+            }
+          } else {
+            console.log(`[CSV] Suggestion ${i} is about tidy conversion - skipping column name validation`);
           }
 
           if (sug.interactive) {
@@ -1795,6 +1807,17 @@ Write your comprehensive report in JSON format based on this actual output.`;
               continue;
             }
 
+            // Find which column this value belongs to and use its full sorted values
+            const sourceColumn = columnMetadata.find(col =>
+              col.type === 'categorical' && col.values && col.values.includes(value)
+            );
+
+            if (sourceColumn) {
+              // Replace options with full sorted list from column metadata
+              sug.interactive.options = [...sourceColumn.values].sort();
+              console.log(`  - Replaced options with ${sug.interactive.options.length} sorted values from column ${sourceColumn.name}`);
+            }
+
             // Calculate positions and add them
             sug.interactive.start = valueIndex;
             sug.interactive.end = valueIndex + value.length;
@@ -1806,6 +1829,49 @@ Write your comprehensive report in JSON format based on this actual output.`;
         // Filter out null suggestions (those with invalid column names)
         suggestions = suggestions.filter(s => s !== null);
         console.log(`[CSV] After validation: ${suggestions.length} suggestions remain`);
+
+        // CRITICAL: If data is not tidy, ensure first suggestion is about converting to tidy format
+        console.log('=== TIDY FORMAT VALIDATION (CSV) ===');
+        console.log('Suggestions count:', suggestions.length);
+        console.log('Has tidyFormat section:', !!reportSections.tidyFormat);
+
+        if (suggestions.length > 0 && reportSections.tidyFormat) {
+          const tidyText = reportSections.tidyFormat.toLowerCase();
+          console.log('TidyFormat text:', reportSections.tidyFormat);
+
+          const isNotTidy = tidyText.includes('not tidy') ||
+                           tidyText.includes('not in tidy') ||
+                           tidyText.includes('needs to be') ||
+                           tidyText.includes('should be') ||
+                           tidyText.includes('requires reshaping') ||
+                           tidyText.includes('pivot');
+
+          console.log('isNotTidy:', isNotTidy);
+
+          if (isNotTidy) {
+            // Check if first suggestion is about tidy conversion
+            const firstSug = suggestions[0].text.toLowerCase();
+            console.log('First suggestion text:', suggestions[0].text);
+
+            const isTidyConversion = firstSug.includes('tidy') ||
+                                    firstSug.includes('pivot') ||
+                                    firstSug.includes('reshape');
+
+            console.log('isTidyConversion:', isTidyConversion);
+
+            if (!isTidyConversion) {
+              console.log('⚠️  [CSV] Data is not tidy but first suggestion is not about conversion');
+              console.log('   Removing non-tidy-conversion suggestions as data must be tidied first');
+              // Remove all suggestions since they won't work without tidy data
+              suggestions = [];
+            } else {
+              console.log('✓ [CSV] Data is not tidy and first suggestion correctly addresses tidy conversion');
+            }
+          } else {
+            console.log('✓ [CSV] Data appears to be in tidy format');
+          }
+        }
+        console.log('=== END TIDY FORMAT VALIDATION (CSV) ===');
       }
 
       console.log('Successfully parsed report sections');
@@ -1957,12 +2023,11 @@ for (col_name in names(${varName})) {
   col_data <- ${varName}[[col_name]]
   # Check if column is character or factor (categorical)
   if (is.character(col_data) || is.factor(col_data)) {
-    unique_vals <- unique(na.omit(col_data))
+    unique_vals <- sort(unique(na.omit(col_data)))
     n_unique <- length(unique_vals)
-    # Only show if there are 2-20 unique values (truly categorical)
-    if (n_unique >= 2 && n_unique <= 20) {
-      cat(paste0("$ ", col_name, ": [", paste(head(unique_vals, 15), collapse = ", "),
-                 if(n_unique > 15) "..." else "", "]\\n"))
+    # Only show if there are 2-250 unique values (truly categorical)
+    if (n_unique >= 2 && n_unique <= 250) {
+      cat(paste0("$ ", col_name, ": [", paste(unique_vals, collapse = ", "), "]\\n"))
     }
   }
 }
@@ -2041,7 +2106,8 @@ save.image(workspace_path)
       if (categoricalMatch) {
         const categoricalText = categoricalMatch[0];
         // Format: $ colname: [value1, value2, value3]
-        const valueMatches = categoricalText.matchAll(/\$ (\w+): \[(.*?)\]/g);
+        // Use [\s\S]*? instead of .*? to match across newlines
+        const valueMatches = categoricalText.matchAll(/\$ (\w+): \[([\s\S]*?)\]/g);
         for (const match of valueMatches) {
           const [, colName, valuesStr] = match;
           // Find this column in metadata and add values
@@ -2126,7 +2192,7 @@ For each section:
 - Base your report ENTIRELY on the R output shown below
 ${suggestionsEnabled ? `
 - For suggestions: provide 2-4 specific, actionable prompts for CHART/PLOT analysis only
-- If data is NOT in tidy format, FIRST suggestion must be a specific prompt to convert it using pivot_longer()
+- ⚠️ CRITICAL: If data is NOT in tidy format, the FIRST suggestion MUST be a specific prompt to convert it to tidy format using pivot_longer(). This will be ENFORCED by server validation - if data is not tidy and first suggestion is not about conversion, ALL suggestions will be removed.
 - Each suggestion MUST be fully executable with specific column names
 - For plot suggestions, you MAY mark ONE categorical VALUE as interactive:
   * Include a specific categorical value in your suggestion (e.g., "for Iris-setosa" or "in Canada")
@@ -2246,22 +2312,34 @@ Write your comprehensive report in JSON format based on this actual output.`;
         for (let i = 0; i < suggestions.length; i++) {
           const sug = suggestions[i];
 
-          // Validate column names in suggestion text
-          // Look for uppercase words or words with underscores that might be column names
-          const potentialColumnNames = sug.text.match(/\b[A-Z][A-Z0-9_]{2,}\b/g) || [];
-          const invalidColumnNames = potentialColumnNames.filter(name =>
-            !allColumnNames.includes(name) &&
-            !allCategoricalValues.includes(name) // Not a categorical value either
-          );
+          // Check if this is a tidy conversion suggestion
+          const sugTextLower = sug.text.toLowerCase();
+          const isTidyConversion = sugTextLower.includes('tidy') ||
+                                  sugTextLower.includes('pivot') ||
+                                  sugTextLower.includes('reshape');
 
-          if (invalidColumnNames.length > 0) {
-            console.log(`⚠️  [SNOWFLAKE] Suggestion ${i} contains HALLUCINATED column names: ${invalidColumnNames.join(', ')}`);
-            console.log(`   Valid columns are: ${allColumnNames.join(', ')}`);
-            console.log(`   Suggestion text: "${sug.text}"`);
-            console.log(`   ❌ REMOVING suggestion due to hallucinated column names`);
-            // Mark for removal
-            suggestions[i] = null;
-            continue;
+          // Skip column validation for tidy conversion suggestions
+          // (they often reference column ranges like X1800:X2100 that may not exactly match)
+          if (!isTidyConversion) {
+            // Validate column names in suggestion text
+            // Look for uppercase words or words with underscores that might be column names
+            const potentialColumnNames = sug.text.match(/\b[A-Z][A-Z0-9_]{2,}\b/g) || [];
+            const invalidColumnNames = potentialColumnNames.filter(name =>
+              !allColumnNames.includes(name) &&
+              !allCategoricalValues.includes(name) // Not a categorical value either
+            );
+
+            if (invalidColumnNames.length > 0) {
+              console.log(`⚠️  [SNOWFLAKE] Suggestion ${i} contains HALLUCINATED column names: ${invalidColumnNames.join(', ')}`);
+              console.log(`   Valid columns are: ${allColumnNames.join(', ')}`);
+              console.log(`   Suggestion text: "${sug.text}"`);
+              console.log(`   ❌ REMOVING suggestion due to hallucinated column names`);
+              // Mark for removal
+              suggestions[i] = null;
+              continue;
+            }
+          } else {
+            console.log(`[SNOWFLAKE] Suggestion ${i} is about tidy conversion - skipping column name validation`);
           }
 
           if (sug.interactive) {
@@ -2285,6 +2363,17 @@ Write your comprehensive report in JSON format based on this actual output.`;
               continue;
             }
 
+            // Find which column this value belongs to and use its full sorted values
+            const sourceColumn = columnMetadata.find(col =>
+              col.type === 'categorical' && col.values && col.values.includes(value)
+            );
+
+            if (sourceColumn) {
+              // Replace options with full sorted list from column metadata
+              sug.interactive.options = [...sourceColumn.values].sort();
+              console.log(`  - Replaced options with ${sug.interactive.options.length} sorted values from column ${sourceColumn.name}`);
+            }
+
             // Calculate positions and add them
             sug.interactive.start = valueIndex;
             sug.interactive.end = valueIndex + value.length;
@@ -2296,6 +2385,49 @@ Write your comprehensive report in JSON format based on this actual output.`;
         // Filter out null suggestions (those with invalid column names)
         suggestions = suggestions.filter(s => s !== null);
         console.log(`[SNOWFLAKE] After validation: ${suggestions.length} suggestions remain`);
+
+        // CRITICAL: If data is not tidy, ensure first suggestion is about converting to tidy format
+        console.log('=== TIDY FORMAT VALIDATION (SNOWFLAKE) ===');
+        console.log('Suggestions count:', suggestions.length);
+        console.log('Has tidyFormat section:', !!reportSections.tidyFormat);
+
+        if (suggestions.length > 0 && reportSections.tidyFormat) {
+          const tidyText = reportSections.tidyFormat.toLowerCase();
+          console.log('TidyFormat text:', reportSections.tidyFormat);
+
+          const isNotTidy = tidyText.includes('not tidy') ||
+                           tidyText.includes('not in tidy') ||
+                           tidyText.includes('needs to be') ||
+                           tidyText.includes('should be') ||
+                           tidyText.includes('requires reshaping') ||
+                           tidyText.includes('pivot');
+
+          console.log('isNotTidy:', isNotTidy);
+
+          if (isNotTidy) {
+            // Check if first suggestion is about tidy conversion
+            const firstSug = suggestions[0].text.toLowerCase();
+            console.log('First suggestion text:', suggestions[0].text);
+
+            const isTidyConversion = firstSug.includes('tidy') ||
+                                    firstSug.includes('pivot') ||
+                                    firstSug.includes('reshape');
+
+            console.log('isTidyConversion:', isTidyConversion);
+
+            if (!isTidyConversion) {
+              console.log('⚠️  [SNOWFLAKE] Data is not tidy but first suggestion is not about conversion');
+              console.log('   Removing non-tidy-conversion suggestions as data must be tidied first');
+              // Remove all suggestions since they won't work without tidy data
+              suggestions = [];
+            } else {
+              console.log('✓ [SNOWFLAKE] Data is not tidy and first suggestion correctly addresses tidy conversion');
+            }
+          } else {
+            console.log('✓ [SNOWFLAKE] Data appears to be in tidy format');
+          }
+        }
+        console.log('=== END TIDY FORMAT VALIDATION (SNOWFLAKE) ===');
       }
 
       console.log('Report sections created:', Object.keys(reportSections));
