@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 /**
  * InteractiveSuggestion Component
@@ -11,6 +11,9 @@ const InteractiveSuggestion = ({ suggestion, iconName, onSubmit }) => {
   const [currentText, setCurrentText] = useState(suggestion.text || suggestion);
   const [showOptions, setShowOptions] = useState(false);
   const [hoverTimeout, setHoverTimeout] = useState(null);
+  const [popupPosition, setPopupPosition] = useState('below'); // 'below' or 'above'
+  const interactiveRef = useRef(null);
+  const popupRef = useRef(null);
 
   // Handle backward compatibility - suggestion might be a string
   const isInteractive = typeof suggestion === 'object' && suggestion.interactive;
@@ -23,6 +26,51 @@ const InteractiveSuggestion = ({ suggestion, iconName, onSubmit }) => {
     }
     return null;
   });
+
+  // Handle click outside to close popup
+  useEffect(() => {
+    if (!showOptions) return;
+
+    const handleClickOutside = (event) => {
+      if (
+        interactiveRef.current &&
+        !interactiveRef.current.contains(event.target) &&
+        popupRef.current &&
+        !popupRef.current.contains(event.target)
+      ) {
+        setShowOptions(false);
+        if (hoverTimeout) {
+          clearTimeout(hoverTimeout);
+          setHoverTimeout(null);
+        }
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showOptions, hoverTimeout]);
+
+  // Calculate popup position to avoid overflow
+  useEffect(() => {
+    if (!showOptions || !interactiveRef.current || !popupRef.current) return;
+
+    const interactiveRect = interactiveRef.current.getBoundingClientRect();
+    const popupRect = popupRef.current.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+
+    // Check if popup would overflow below
+    const spaceBelow = viewportHeight - interactiveRect.bottom;
+    const spaceAbove = interactiveRect.top;
+
+    // If not enough space below but more space above, position above
+    if (spaceBelow < popupRect.height && spaceAbove > spaceBelow) {
+      setPopupPosition('above');
+    } else {
+      setPopupPosition('below');
+    }
+  }, [showOptions]);
 
   // Handle option selection
   const handleOptionSelect = (newValue) => {
@@ -92,6 +140,7 @@ const InteractiveSuggestion = ({ suggestion, iconName, onSubmit }) => {
       <span className="break-words">
         {before}
         <span
+          ref={interactiveRef}
           className="interactive-value"
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
@@ -99,7 +148,8 @@ const InteractiveSuggestion = ({ suggestion, iconName, onSubmit }) => {
           {interactiveValue}
           {showOptions && (
             <div
-              className="options-popup"
+              ref={popupRef}
+              className={`options-popup ${popupPosition === 'above' ? 'options-popup-above' : ''}`}
               onMouseEnter={() => {
                 // Keep popup visible when hovering over it
                 if (hoverTimeout) {

@@ -11,19 +11,22 @@ const R_API_URL = 'http://localhost:3001/api/execute-r';
  * Execute R code via backend and return the output
  * @param {string} code - The R code to execute
  * @param {boolean} autoFormatTabular - Whether to auto-format tabular data with gt
+ * @param {boolean} refreshMetadata - Whether to refresh metadata after execution
+ * @param {string} activeDataset - Name of the active dataset to refresh metadata for
  * @returns {Promise<Object>} Result containing output, plots, and any errors
  */
-export async function executeRCode(code, autoFormatTabular = true) {
+export async function executeRCode(code, autoFormatTabular = true, refreshMetadata = false, activeDataset = 'data') {
   try {
     console.log('Executing R code via backend:', code.substring(0, 100) + '...');
     console.log('Auto format tabular:', autoFormatTabular);
+    console.log('Refresh metadata:', refreshMetadata, 'for dataset:', activeDataset);
 
     const response = await fetch(R_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ code, autoFormatTabular }),
+      body: JSON.stringify({ code, autoFormatTabular, refreshMetadata, activeDataset }),
     });
 
     if (!response.ok) {

@@ -46,11 +46,18 @@ function App() {
   const [dataFrames, setDataFrames] = useState([]);
   const [suggestionsEnabled, setSuggestionsEnabled] = useState(true);
   const [autoFormatTabular, setAutoFormatTabular] = useState(true);
-  const [columnMetadata, setColumnMetadata] = useState(null); // Dataset schema for Claude
+  const [columnMetadata, setColumnMetadata] = useState(null); // Dataset schema for Claude (DEPRECATED: use datasetRegistry)
   const [showConversationsMenu, setShowConversationsMenu] = useState(false);
+
+  // Dataset registry - tracks all datasets in R environment with their metadata
+  const [datasetRegistry, setDatasetRegistry] = useState({
+    activeDataset: null,  // Currently active dataset name (e.g., 'data', 'life_exp_tidy')
+    datasets: {}          // Map of dataset name -> { columnMetadata, lastModified, hash }
+  });
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [favoritedCardIds, setFavoritedCardIds] = useState(new Set());
   const [isSubmitAnimating, setIsSubmitAnimating] = useState(false);
+  const [expandedSuggestions, setExpandedSuggestions] = useState(new Set()); // Track which message IDs have expanded suggestions
   const [isRecording, setIsRecording] = useState(false);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [showSnowflakeModal, setShowSnowflakeModal] = useState(false);
@@ -140,6 +147,29 @@ function App() {
   useEffect(() => {
     if (messagesContainerRef.current) {
       messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  // Auto-expand latest suggestions and collapse previous ones
+  useEffect(() => {
+    // Find all messages with suggestions
+    const messagesWithSuggestions = messages
+      .map((msg, idx) => ({
+        ...msg,
+        index: idx,
+        hasSuggestions: msg.role === 'assistant' && (
+          (msg.suggestions && msg.suggestions.length > 0) ||
+          (msg.content && msg.content.includes('**Suggestions for further analysis:**'))
+        )
+      }))
+      .filter(msg => msg.hasSuggestions);
+
+    if (messagesWithSuggestions.length > 0) {
+      // Get the latest message with suggestions
+      const latestWithSuggestions = messagesWithSuggestions[messagesWithSuggestions.length - 1];
+
+      // Expand only the latest, collapse all others
+      setExpandedSuggestions(new Set([latestWithSuggestions.id]));
     }
   }, [messages]);
 
@@ -641,10 +671,31 @@ Please respond with a JSON object in this format:
           console.log('reportSections:', result.reportSections);
           console.log('filename:', result.filename);
 
-          // Store column metadata for future chat requests
+          // Store column metadata in dataset registry
           if (result.columnMetadata) {
+            const datasetName = result.datasetName || 'data';  // Default to 'data'
+            const metadataHash = JSON.stringify({
+              ncol: result.columnMetadata.length,
+              columns: result.columnMetadata.map(c => c.name)
+            });
+
+            // Update dataset registry
+            setDatasetRegistry({
+              activeDataset: datasetName,
+              datasets: {
+                [datasetName]: {
+                  columnMetadata: result.columnMetadata,
+                  lastModified: Date.now(),
+                  hash: metadataHash,
+                  source: 'csv',
+                  filename: filename
+                }
+              }
+            });
+
+            // Also update legacy columnMetadata for backward compatibility
             setColumnMetadata(result.columnMetadata);
-            console.log('Column metadata stored:', result.columnMetadata);
+            console.log(`Dataset registry updated for '${datasetName}':`, result.columnMetadata);
           }
 
           // Create a code card for the diagnostic code
@@ -761,10 +812,31 @@ Please respond with a JSON object in this format:
 
         console.log('Snowflake load result:', result);
 
-        // Store column metadata for future chat requests
+        // Store column metadata in dataset registry
         if (result.columnMetadata) {
+          const datasetName = result.datasetName || varName;  // Use specified varName or default
+          const metadataHash = JSON.stringify({
+            ncol: result.columnMetadata.length,
+            columns: result.columnMetadata.map(c => c.name)
+          });
+
+          // Update dataset registry
+          setDatasetRegistry({
+            activeDataset: datasetName,
+            datasets: {
+              [datasetName]: {
+                columnMetadata: result.columnMetadata,
+                lastModified: Date.now(),
+                hash: metadataHash,
+                source: 'snowflake',
+                fullTableName: fullTableName
+              }
+            }
+          });
+
+          // Also update legacy columnMetadata for backward compatibility
           setColumnMetadata(result.columnMetadata);
-          console.log('Column metadata stored:', result.columnMetadata);
+          console.log(`Dataset registry updated for '${datasetName}':`, result.columnMetadata);
         }
 
         // Validate we have report sections
@@ -870,6 +942,19 @@ Please respond with a JSON object in this format:
         textareaRef.current.focus();
       }
     }
+  };
+
+  // Toggle suggestions expansion for a specific message
+  const toggleSuggestionsExpansion = (messageId) => {
+    setExpandedSuggestions(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(messageId)) {
+        newSet.delete(messageId);
+      } else {
+        newSet.add(messageId);
+      }
+      return newSet;
+    });
   };
 
   // Handle input change - detect slash commands
@@ -1048,6 +1133,11 @@ Please respond with a JSON object in this format:
         }
       }
 
+      // Get active dataset metadata from registry
+      const activeDatasetMetadata = datasetRegistry.activeDataset && datasetRegistry.datasets[datasetRegistry.activeDataset]
+        ? datasetRegistry.datasets[datasetRegistry.activeDataset].columnMetadata
+        : columnMetadata;  // Fall back to legacy metadata
+
       // Send to Claude API with plot images and column metadata
       const response = await sendMessageToClaude(
         apiKey,
@@ -1055,7 +1145,7 @@ Please respond with a JSON object in this format:
         messages.map(m => ({ role: m.role, content: m.content })),
         suggestionsEnabled,
         recentPlots,  // Pass recent plots for Claude to see
-        columnMetadata  // Pass dataset schema so Claude knows column names
+        activeDatasetMetadata  // Pass dataset schema so Claude knows column names
       );
 
       // Create code cards for any R code blocks
@@ -1158,9 +1248,47 @@ Please respond with a JSON object in this format:
   // Execute R code and update output
   const executeSelectedCode = async (code, cardId) => {
     try {
-      // Execute the code via backend
-      const result = await executeRCode(code, autoFormatTabular);
+      // Determine if this code might modify the dataset structure
+      const mightModifyDataset = code.includes('pivot_longer') ||
+                                  code.includes('pivot_wider') ||
+                                  code.includes('mutate') ||
+                                  code.includes('filter') ||
+                                  code.includes('select') ||
+                                  code.includes('join') ||
+                                  code.includes('<-') ||  // Assignment
+                                  code.includes('=');     // Assignment
+
+      // Execute the code via backend, requesting metadata refresh if needed
+      const result = await executeRCode(
+        code,
+        autoFormatTabular,
+        mightModifyDataset,  // refreshMetadata
+        datasetRegistry.activeDataset || 'data'  // activeDataset
+      );
+
       setCurrentOutput(result);
+
+      // Update dataset registry if metadata was refreshed
+      if (result.updatedMetadata) {
+        const { datasetName, columnMetadata, hash } = result.updatedMetadata;
+        console.log(`[EXECUTE] Updating registry for dataset '${datasetName}' with refreshed metadata`);
+
+        setDatasetRegistry(prev => ({
+          ...prev,
+          activeDataset: datasetName,  // Keep or update active dataset
+          datasets: {
+            ...prev.datasets,
+            [datasetName]: {
+              columnMetadata: columnMetadata,
+              lastModified: Date.now(),
+              hash: hash
+            }
+          }
+        }));
+
+        // Also update legacy columnMetadata for backward compatibility
+        setColumnMetadata(columnMetadata);
+      }
 
       // Store output with the card using the provided cardId
       setCodeCards(prev =>
@@ -1191,6 +1319,12 @@ Please respond with a JSON object in this format:
 
   // Parse suggestions from message content
   const parseSuggestions = (content) => {
+    // Safety check: ensure content is a string
+    if (typeof content !== 'string') {
+      console.error('[parseSuggestions] ERROR: content is not a string!', typeof content, content);
+      return { mainContent: String(content || ''), suggestions: [] };
+    }
+
     const suggestionsMatch = content.match(/\*\*Suggestions for further analysis:\*\*\s*([\s\S]*?)(?:\n\n|$)/);
     if (!suggestionsMatch) {
       console.log('[parseSuggestions] No suggestions found in content');
@@ -1231,11 +1365,28 @@ Please respond with a JSON object in this format:
       console.log('[renderMessage] Rendering', suggestions.length, 'suggestions. First suggestion type:', typeof suggestions[0], suggestions[0]);
     }
 
+    // Debug logging for content type
+    if (typeof mainContent !== 'string' && mainContent !== undefined) {
+      console.error('[renderMessage] WARNING: mainContent is not a string!', typeof mainContent, mainContent);
+    }
+
+    // For assistant messages, use negative margin to pull closer to previous message
+    // User measured 33px and wants 20px, so reduce by 13px
+    // Exception: Dataset reports don't use negative margin (they have their own spacing)
+    const hasDatasetReport = message.reportSections && message.filename;
+
+    // User messages get extra top margin (doubled from 12px to 24px)
+    const containerStyle = message.role === 'assistant' && !hasDatasetReport
+      ? { marginTop: '-13px' }
+      : message.role === 'user'
+        ? { marginTop: '24px' }
+        : {};
+
     return (
-      <div key={message.id} className="mb-4">
+      <div key={message.id} className="mb-4" style={containerStyle}>
         {/* Message bubble - only show if there's content */}
         {mainContent && (
-          <div className={`${message.role === 'user' ? 'text-right' : 'text-left'}`}>
+          <div className={message.role === 'user' ? 'text-right' : 'text-left'}>
             <div
               className={`inline-block max-w-[80%] p-3 rounded-lg ${
                 message.role === 'user'
@@ -1244,8 +1395,8 @@ Please respond with a JSON object in this format:
               }`}
               style={{ fontSize: '11pt' }}
             >
-              <div className="whitespace-pre-wrap break-words">
-                <ReactMarkdown>{mainContent}</ReactMarkdown>
+              <div className="whitespace-pre-wrap break-words text-left">
+                <ReactMarkdown>{typeof mainContent === 'string' ? mainContent : String(mainContent || '')}</ReactMarkdown>
               </div>
             </div>
           </div>
@@ -1253,7 +1404,7 @@ Please respond with a JSON object in this format:
 
         {/* Dataset report with tabs (if available) */}
         {message.reportSections && message.filename && (
-          <div className="mt-3 max-w-[80%]">
+          <div className="max-w-[80%]" style={{ marginTop: '7px' }}>
             <DatasetReport
               filename={message.filename}
               reportSections={message.reportSections}
@@ -1263,7 +1414,7 @@ Please respond with a JSON object in this format:
 
         {/* Code cards inline (if any) */}
         {message.codeCards && message.codeCards.length > 0 && (
-          <div className="mt-3 space-y-2 max-w-[80%]">
+          <div className="space-y-2 max-w-[80%] mt-1">
             {message.codeCards.map(card => (
               <CodeCard
                 key={card.id}
@@ -1281,24 +1432,34 @@ Please respond with a JSON object in this format:
 
         {/* Suggestions (if any) */}
         {suggestions.length > 0 && (
-          <div className="mt-3 ml-0 max-w-2xl" style={{ fontSize: '10pt' }}>
-            <div className="flex items-baseline gap-2 mb-2">
+          <div className="mb-6 ml-0 max-w-2xl mt-1" style={{ fontSize: '10pt' }}>
+            <div
+              className="flex items-center gap-2 mb-2 cursor-pointer hover:bg-gray-50 rounded px-2 py-1 -mx-2"
+              onClick={() => toggleSuggestionsExpansion(message.id)}
+            >
               <p className="font-semibold text-gray-700">Suggestions:</p>
               <p className="text-xs text-gray-500 italic">SHIFT click to submit directly</p>
+              <img
+                src={expandedSuggestions.has(message.id) ? '/carat_open.png' : '/carat_closed.png'}
+                alt={expandedSuggestions.has(message.id) ? 'Collapse' : 'Expand'}
+                className="w-4 h-4 transition-opacity duration-200"
+              />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              {suggestions.map((suggestion, index) => {
-                const iconName = getSuggestionIcon(suggestion);
-                return (
-                  <InteractiveSuggestion
-                    key={index}
-                    suggestion={suggestion}
-                    iconName={iconName}
-                    onSubmit={handleSuggestionClick}
-                  />
-                );
-              })}
-            </div>
+            {expandedSuggestions.has(message.id) && (
+              <div className="grid grid-cols-2 gap-3">
+                {suggestions.map((suggestion, index) => {
+                  const iconName = getSuggestionIcon(suggestion);
+                  return (
+                    <InteractiveSuggestion
+                      key={index}
+                      suggestion={suggestion}
+                      iconName={iconName}
+                      onSubmit={handleSuggestionClick}
+                    />
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1651,7 +1812,7 @@ Please respond with a JSON object in this format:
                         return (
                           <button
                             key={index}
-                            onClick={() => setInputValue(suggestion)}
+                            onClick={(e) => handleSuggestionClick(suggestion, e)}
                             className="suggestion-button flex items-start gap-2 text-left text-blue-600 hover:text-blue-800 hover:underline cursor-pointer p-2"
                           >
                             <img

@@ -203,6 +203,13 @@ code {
   animation: popup-appear 0.15s ease-out;
 }
 
+.options-popup-above {
+  top: auto;
+  bottom: 100%;
+  margin-top: 0;
+  margin-bottom: 4px;
+}
+
 @keyframes popup-appear {
   0% {
     opacity: 0;

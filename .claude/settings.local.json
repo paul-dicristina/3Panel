@@ -20,7 +20,8 @@
       "Bash(npx acorn:*)",
       "Bash(git stash:*)",
       "Bash(brew search:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(npm run build:*)"
     ],
     "deny": [],
     "ask": []

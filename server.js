@@ -81,6 +81,11 @@ app.post('/api/chat', async (req, res) => {
   try {
     const { apiKey, messages, suggestionsEnabled, recentPlots, columnMetadata } = req.body;
 
+    console.log('[/api/chat] Request received');
+    console.log('[/api/chat] suggestionsEnabled:', suggestionsEnabled);
+    console.log('[/api/chat] columnMetadata present:', !!columnMetadata);
+    console.log('[/api/chat] messages count:', messages?.length);
+
     if (!apiKey) {
       return res.status(400).json({
         error: 'API key is required'
@@ -579,7 +584,19 @@ IMPORTANT: This diagnostic requirement applies ONLY when LOADING data, not when 
     if (suggestionsEnabled) {
       systemPrompt += `
 
-IMPORTANT: After providing your response and R code, if the user's request involved analyzing a specific dataset, you MUST include exactly 4 suggestions for further analysis. Format these suggestions at the end of your response like this:
+CRITICAL - SUGGESTIONS REQUIREMENT:
+When a dataset is currently loaded and available in the workspace, you MUST include exactly 4 suggestions for further analysis after EVERY response that involves that dataset. This includes:
+- Viewing data (head, tail, glimpse, summary, str, View, etc.)
+- Analyzing data (calculations, statistics, models, etc.)
+- Transforming data (filtering, mutating, pivoting, etc.)
+- Visualizing data (plots, charts, graphs, etc.)
+
+The ONLY time you should NOT include suggestions is for:
+- General R help questions with no dataset involved
+- Connection/setup tasks (loading libraries, connecting to databases)
+- Questions about syntax or R programming concepts
+
+Format suggestions at the end of your response like this:
 
 **Suggestions for further analysis:**
 - Suggestion 1
@@ -595,10 +612,12 @@ CRITICAL REQUIREMENTS FOR SUGGESTIONS:
 5. Base suggestions ONLY on columns/variables that have been explicitly shown or used in the conversation
 6. Do NOT assume the dataset contains additional columns that weren't mentioned
 7. If you're unsure what columns exist, suggest exploring the dataset structure first (e.g., "Show column names and structure of mtcars")
-8. WHEN TO PROVIDE SUGGESTIONS:
-   - Provide suggestions when the user explicitly names a dataset (e.g., "mtcars", "iris_data", "lex")
-   - ALSO provide suggestions when the user says "the dataset", "this data", "the data", etc. and you are actively working with a dataset from the conversation history
-   - Do NOT provide suggestions for general questions or tasks not involving dataset analysis (e.g., "how do I connect to Snowflake?")
+8. WHEN TO PROVIDE SUGGESTIONS (READ THIS CAREFULLY):
+   - If a dataset variable exists in the conversation history (e.g., mtcars, iris, a loaded CSV), you MUST provide suggestions for ANY request involving that dataset
+   - This explicitly includes simple viewing commands like "head(dataset)", "show the first 10 rows", "display the data"
+   - This includes ALL analytical operations, transformations, and visualizations
+   - The ONLY exceptions are: pure R syntax questions, connection setup, or library loading with no dataset interaction
+   - When in doubt, ALWAYS include suggestions if any dataset is mentioned or used in your R code
 
 GOOD EXAMPLES OF SPECIFIC, ACTIONABLE SUGGESTIONS:
 ✓ "Create a scatter plot of hp vs mpg from mtcars with points colored by cyl"
@@ -835,9 +854,13 @@ WHEN NOT TO USE:
     let parsedSuggestions = null;
     if (suggestionsEnabled && message.content && message.content[0] && message.content[0].text) {
       const responseText = message.content[0].text;
+      console.log('[/api/chat] Checking for suggestions in response...');
+      console.log('[/api/chat] Response text preview:', responseText.substring(0, 200));
       const suggestionsMatch = responseText.match(/\*\*Suggestions for further analysis:\*\*\s*([\s\S]*?)(?:\n\n|$)/);
 
       if (suggestionsMatch) {
+        console.log('[/api/chat] Found suggestions section in response');
+
         const suggestionsText = suggestionsMatch[1];
         const suggestionLines = suggestionsText
           .split('\n')
@@ -845,12 +868,96 @@ WHEN NOT TO USE:
           .map(line => line.replace(/^-\s*/, '').trim())
           .filter(s => s.length > 0);
 
-        // For now, return as simple strings - interactive metadata would require
-        // knowing the dataset schema, which we don't have in regular chat
-        parsedSuggestions = suggestionLines;
+        // Convert to suggestion objects
+        parsedSuggestions = suggestionLines.map(text => ({ text }));
 
         console.log('[/api/chat] Extracted', parsedSuggestions.length, 'suggestions from response');
+
+        // Add interactive elements if we have column metadata
+        if (columnMetadata && columnMetadata.length > 0) {
+          console.log('[/api/chat] Adding interactive elements using column metadata');
+
+          // Get categorical columns sorted by priority (prefer longer, more descriptive names)
+          const categoricalColumns = columnMetadata
+            .filter(col => col.type === 'categorical' && col.values && col.values.length > 0)
+            .sort((a, b) => {
+              // Prefer "name" column over others
+              if (a.name === 'name') return -1;
+              if (b.name === 'name') return 1;
+              // Then prefer longer column names (more descriptive)
+              return b.name.length - a.name.length;
+            });
+
+          console.log('[/api/chat] Categorical columns in priority order:', categoricalColumns.map(c => c.name));
+
+          // Blacklist of common English words to exclude from interactive matching
+          // Even if these are valid data values, making them interactive is confusing
+          const commonWordBlacklist = new Set([
+            'and', 'or', 'in', 'to', 'for', 'the', 'a', 'an', 'of', 'at', 'by', 'with',
+            'from', 'on', 'as', 'is', 'was', 'are', 'be', 'been', 'being', 'have', 'has',
+            'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might',
+            'can', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below',
+            'up', 'down', 'out', 'over', 'under', 'again', 'further', 'then', 'once'
+          ]);
+
+          // Process each suggestion to add interactive elements
+          for (const sug of parsedSuggestions) {
+            let bestMatch = null;
+
+            // Try each categorical column in priority order
+            for (const col of categoricalColumns) {
+              // Sort values by length (longest first) to match longer names before shorter ones
+              const sortedValues = [...col.values].sort((a, b) => b.length - a.length);
+
+              for (const value of sortedValues) {
+                // Skip common English words and very short values (likely codes, not names)
+                const valueLower = value.toLowerCase();
+                if (commonWordBlacklist.has(valueLower) || value.length < 4) {
+                  continue;
+                }
+
+                // Use word boundary regex to avoid substring matches
+                // Match the value as a whole word (not part of another word)
+                const regex = new RegExp(`\\b${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+                const match = sug.text.match(regex);
+
+                if (match) {
+                  const valueIndex = match.index;
+
+                  // Keep track of the best match (prefer earlier matches, then from priority columns)
+                  if (!bestMatch || valueIndex < bestMatch.index) {
+                    bestMatch = {
+                      value: match[0],  // Use actual matched text (preserves case)
+                      column: col,
+                      index: valueIndex
+                    };
+                  }
+                }
+              }
+
+              // If we found a match in this priority column, use it
+              if (bestMatch) break;
+            }
+
+            // Apply the best match if found
+            if (bestMatch) {
+              sug.interactive = {
+                value: bestMatch.value,
+                context: `Select ${bestMatch.column.name}`,
+                options: [...bestMatch.column.values].sort(),
+                start: bestMatch.index,
+                end: bestMatch.index + bestMatch.value.length
+              };
+
+              console.log(`[/api/chat] Made suggestion interactive with value "${bestMatch.value}" from column ${bestMatch.column.name}`);
+            }
+          }
+        }
+      } else {
+        console.log('[/api/chat] No suggestions section found in response');
       }
+    } else {
+      console.log('[/api/chat] Skipping suggestion extraction (suggestionsEnabled:', suggestionsEnabled, ')');
     }
 
     // Return the response with parsed suggestions
@@ -904,7 +1011,12 @@ app.post('/api/execute-r', async (req, res) => {
   const htmlPath = join(tempDir, `widget_${timestamp}.html`);
 
   try {
-    const { code, autoFormatTabular = true } = req.body;
+    const {
+      code,
+      autoFormatTabular = true,
+      refreshMetadata = false,  // Whether to refresh metadata after execution
+      activeDataset = 'data'     // Which dataset to refresh metadata for
+    } = req.body;
 
     if (!code || typeof code !== 'string') {
       return res.status(400).json({
@@ -913,6 +1025,7 @@ app.post('/api/execute-r', async (req, res) => {
     }
 
     console.log('Auto format tabular:', autoFormatTabular);
+    console.log('Refresh metadata:', refreshMetadata, 'for dataset:', activeDataset);
 
     // Create temp directory if it doesn't exist
     try {
@@ -1227,6 +1340,185 @@ save.image("${workspacePath.replace(/\\/g, '/')}")
         console.log('R execution stdout:', stdout);
         console.log('R execution stderr:', stderr);
         console.log('Result:', { hasPlots: result.plots.length, hasError: !!result.error });
+
+        // Refresh metadata if requested
+        if (refreshMetadata && !result.error) {
+          try {
+            console.log(`[METADATA REFRESH] Refreshing metadata for dataset: ${activeDataset}`);
+
+            // Check if dataset exists
+            const checkCode = `exists("${activeDataset}")`;
+            const checkScriptPath = join(tempDir, `check_${timestamp}.R`);
+            const checkWrapperCode = `
+# Set working directory to data folder
+setwd("${dataDir.replace(/\\/g, '/')}")
+
+# Load workspace if it exists
+if (file.exists("${workspacePath.replace(/\\/g, '/')}")) {
+  load("${workspacePath.replace(/\\/g, '/')}")
+}
+
+cat(${checkCode})
+`;
+
+            await writeFile(checkScriptPath, checkWrapperCode, 'utf8');
+            const checkResult = await new Promise((resolve) => {
+              exec(`Rscript --vanilla "${checkScriptPath}"`, (err, stdout) => {
+                resolve(stdout.trim() === 'TRUE');
+              });
+            });
+            await unlink(checkScriptPath).catch(() => {});
+
+            if (checkResult) {
+              // Dataset exists, get updated metadata
+              const metadataCode = `
+# Check if dataset exists and is valid
+if (!exists("${activeDataset}") || is.null(${activeDataset})) {
+  list(
+    error = "Dataset does not exist or is NULL",
+    ncol = 0,
+    nrow = 0,
+    colnames = character(0),
+    categoricalInfo = list(),
+    numericCols = character(0)
+  )
+} else {
+  # Analyze categorical columns
+  categorical_info <- list()
+  numeric_cols <- c()
+
+  for (col_name in names(${activeDataset})) {
+    col_data <- ${activeDataset}[[col_name]]
+
+    if (is.factor(col_data) || is.character(col_data)) {
+      n_unique <- length(unique(na.omit(col_data)))
+      if (n_unique >= 2 && n_unique <= 250) {
+        unique_vals <- sort(unique(na.omit(col_data)))
+        categorical_info[[col_name]] <- unique_vals
+      }
+    } else if (is.numeric(col_data)) {
+      numeric_cols <- c(numeric_cols, col_name)
+    }
+  }
+
+  # Return structure info
+  list(
+    ncol = ncol(${activeDataset}),
+    nrow = nrow(${activeDataset}),
+    colnames = names(${activeDataset}),
+    categoricalInfo = categorical_info,
+    numericCols = numeric_cols
+  )
+}
+`;
+
+              const metadataScriptPath = join(tempDir, `metadata_${timestamp}.R`);
+              const metadataWrapperCode = `
+# Set working directory to data folder
+setwd("${dataDir.replace(/\\/g, '/')}")
+
+# Load workspace if it exists
+if (file.exists("${workspacePath.replace(/\\/g, '/')}")) {
+  load("${workspacePath.replace(/\\/g, '/')}")
+}
+
+suppressPackageStartupMessages({
+  library(jsonlite)
+})
+
+result <- ${metadataCode}
+cat(toJSON(result, auto_unbox = TRUE))
+`;
+
+              await writeFile(metadataScriptPath, metadataWrapperCode, 'utf8');
+
+              const metadataResult = await new Promise((resolve, reject) => {
+                exec(`Rscript --vanilla "${metadataScriptPath}"`, (err, stdout, stderr) => {
+                  if (err) {
+                    console.error('[METADATA REFRESH] Error:', stderr);
+                    reject(err);
+                  } else {
+                    try {
+                      // Extract JSON from stdout (may contain other output before the JSON)
+                      let jsonStr = stdout.trim();
+
+                      // Try to find JSON object boundaries
+                      const firstBrace = jsonStr.indexOf('{');
+                      const lastBrace = jsonStr.lastIndexOf('}');
+
+                      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+                        jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
+                      }
+
+                      const parsed = JSON.parse(jsonStr);
+                      resolve(parsed);
+                    } catch (parseErr) {
+                      console.error('[METADATA REFRESH] Parse error:', parseErr);
+                      console.error('[METADATA REFRESH] Stdout was:', stdout);
+                      // Don't reject - just resolve with empty metadata
+                      resolve({
+                        ncol: 0,
+                        nrow: 0,
+                        colnames: [],
+                        categoricalInfo: {},
+                        numericCols: []
+                      });
+                    }
+                  }
+                });
+              });
+
+              await unlink(metadataScriptPath).catch(() => {});
+
+              // Check if metadata retrieval had an error
+              if (metadataResult.error) {
+                console.log(`[METADATA REFRESH] ${metadataResult.error}`);
+              } else if (metadataResult.colnames && metadataResult.colnames.length > 0) {
+                // Build columnMetadata array
+                const columnMetadata = [];
+
+                for (const colName of metadataResult.colnames) {
+                  if (metadataResult.categoricalInfo && metadataResult.categoricalInfo[colName]) {
+                    columnMetadata.push({
+                      name: colName,
+                      type: 'categorical',
+                      values: metadataResult.categoricalInfo[colName]
+                    });
+                  } else if (metadataResult.numericCols && metadataResult.numericCols.includes(colName)) {
+                    columnMetadata.push({
+                      name: colName,
+                      type: 'numeric'
+                    });
+                  } else {
+                    columnMetadata.push({
+                      name: colName,
+                      type: 'other'
+                    });
+                  }
+                }
+
+                // Add metadata to result
+                result.updatedMetadata = {
+                  datasetName: activeDataset,
+                  columnMetadata: columnMetadata,
+                hash: JSON.stringify({
+                  ncol: metadataResult.ncol,
+                  nrow: metadataResult.nrow,
+                  columns: metadataResult.colnames
+                })
+              };
+
+                console.log(`[METADATA REFRESH] Successfully refreshed metadata for '${activeDataset}'`);
+                console.log(`[METADATA REFRESH] Columns: ${columnMetadata.length}, Categorical: ${columnMetadata.filter(c => c.type === 'categorical').length}`);
+              }
+            } else {
+              console.log(`[METADATA REFRESH] Dataset '${activeDataset}' does not exist in workspace`);
+            }
+          } catch (metadataError) {
+            console.error('[METADATA REFRESH] Failed to refresh metadata:', metadataError);
+            // Don't fail the whole request, just skip metadata
+          }
+        }
 
         // Clean up script file
         await unlink(scriptPath).catch(() => {});
@@ -1839,12 +2131,23 @@ Write your comprehensive report in JSON format based on this actual output.`;
           const tidyText = reportSections.tidyFormat.toLowerCase();
           console.log('TidyFormat text:', reportSections.tidyFormat);
 
-          const isNotTidy = tidyText.includes('not tidy') ||
-                           tidyText.includes('not in tidy') ||
-                           tidyText.includes('needs to be') ||
-                           tidyText.includes('should be') ||
+          // Check if data IS already tidy (positive indicators)
+          const isTidy = tidyText.includes('already in tidy') ||
+                        tidyText.includes('is in tidy') ||
+                        tidyText.includes('is tidy') ||
+                        tidyText.includes('no reshaping') ||
+                        tidyText.includes('no pivot') ||
+                        tidyText.includes('not required') && tidyText.includes('pivot');
+
+          // Check if data is NOT tidy (negative indicators)
+          const isNotTidy = !isTidy && (
+                           tidyText.includes('not tidy') ||
+                           tidyText.includes('not in tidy format') ||
+                           tidyText.includes('needs to be reshaped') ||
+                           tidyText.includes('should be reshaped') ||
                            tidyText.includes('requires reshaping') ||
-                           tidyText.includes('pivot');
+                           tidyText.includes('should use pivot') ||
+                           tidyText.includes('needs pivot'));
 
           console.log('isNotTidy:', isNotTidy);
 
@@ -2395,12 +2698,23 @@ Write your comprehensive report in JSON format based on this actual output.`;
           const tidyText = reportSections.tidyFormat.toLowerCase();
           console.log('TidyFormat text:', reportSections.tidyFormat);
 
-          const isNotTidy = tidyText.includes('not tidy') ||
-                           tidyText.includes('not in tidy') ||
-                           tidyText.includes('needs to be') ||
-                           tidyText.includes('should be') ||
+          // Check if data IS already tidy (positive indicators)
+          const isTidy = tidyText.includes('already in tidy') ||
+                        tidyText.includes('is in tidy') ||
+                        tidyText.includes('is tidy') ||
+                        tidyText.includes('no reshaping') ||
+                        tidyText.includes('no pivot') ||
+                        tidyText.includes('not required') && tidyText.includes('pivot');
+
+          // Check if data is NOT tidy (negative indicators)
+          const isNotTidy = !isTidy && (
+                           tidyText.includes('not tidy') ||
+                           tidyText.includes('not in tidy format') ||
+                           tidyText.includes('needs to be reshaped') ||
+                           tidyText.includes('should be reshaped') ||
                            tidyText.includes('requires reshaping') ||
-                           tidyText.includes('pivot');
+                           tidyText.includes('should use pivot') ||
+                           tidyText.includes('needs pivot'));
 
           console.log('isNotTidy:', isNotTidy);
 
