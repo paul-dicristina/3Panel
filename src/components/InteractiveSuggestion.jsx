@@ -8,7 +8,9 @@ import React, { useState, useEffect, useRef } from 'react';
  */
 const InteractiveSuggestion = ({ suggestion, iconName, onSubmit }) => {
   // Track current text (may differ from original if user swaps values)
-  const [currentText, setCurrentText] = useState(suggestion.text || suggestion);
+  // IMPORTANT: Ensure this is always a string
+  const initialText = typeof suggestion === 'string' ? suggestion : (suggestion.text || '');
+  const [currentText, setCurrentText] = useState(String(initialText));
   const [showOptions, setShowOptions] = useState(false);
   const [hoverTimeout, setHoverTimeout] = useState(null);
   const [popupPosition, setPopupPosition] = useState('below'); // 'below' or 'above'
@@ -97,6 +99,28 @@ const InteractiveSuggestion = ({ suggestion, iconName, onSubmit }) => {
     }
   };
 
+  // Handle slider value change
+  const handleSliderChange = (e) => {
+    e.stopPropagation(); // Prevent event from bubbling up
+    e.preventDefault();
+
+    if (!interactive || !interactivePositions) return;
+
+    const newValue = e.target.value;
+    const { start, end } = interactivePositions;
+    const valueStr = String(newValue);
+    const newText = currentText.substring(0, start) + valueStr + currentText.substring(end);
+
+    // Update text
+    setCurrentText(newText);
+
+    // Recalculate positions for the new value
+    setInteractivePositions({
+      start: start,
+      end: start + valueStr.length
+    });
+  };
+
   // Handle mouse enter on interactive element
   const handleMouseEnter = () => {
     // Small delay before showing options to avoid accidental triggers
@@ -131,10 +155,12 @@ const InteractiveSuggestion = ({ suggestion, iconName, onSubmit }) => {
     }
 
     const { start, end } = interactivePositions;
-    const { context, options } = interactive;
+    const { context, options, type, min, max, step } = interactive;
     const before = currentText.substring(0, start);
     const interactiveValue = currentText.substring(start, end);
     const after = currentText.substring(end);
+
+    const isSlider = type === 'slider';
 
     return (
       <span className="break-words">
@@ -149,7 +175,10 @@ const InteractiveSuggestion = ({ suggestion, iconName, onSubmit }) => {
           {showOptions && (
             <div
               ref={popupRef}
-              className={`options-popup ${popupPosition === 'above' ? 'options-popup-above' : ''}`}
+              className={`options-popup ${popupPosition === 'above' ? 'options-popup-above' : ''} ${isSlider ? 'slider-popup' : ''}`}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onMouseUp={(e) => e.stopPropagation()}
               onMouseEnter={() => {
                 // Keep popup visible when hovering over it
                 if (hoverTimeout) {
@@ -160,22 +189,51 @@ const InteractiveSuggestion = ({ suggestion, iconName, onSubmit }) => {
               }}
               onMouseLeave={handlePopupMouseLeave}
             >
-              <div className="options-header">{context}</div>
-              <div className="options-list">
-                {options.map((option, idx) => (
-                  <div
-                    key={idx}
-                    className={`option-item ${option === interactiveValue ? 'selected' : ''}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleOptionSelect(option);
-                    }}
-                  >
-                    {option}
-                    {option === interactiveValue && <span className="checkmark">✓</span>}
+              {isSlider ? (
+                // Slider UI
+                <div
+                  className="slider-container"
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <div className="slider-header">{context}</div>
+                  <div className="slider-control">
+                    <input
+                      type="range"
+                      min={min || 1}
+                      max={max || 100}
+                      step={step || 1}
+                      value={parseInt(interactiveValue) || min || 1}
+                      onChange={handleSliderChange}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onMouseUp={(e) => e.stopPropagation()}
+                      onClick={(e) => e.stopPropagation()}
+                      className="slider-input"
+                    />
+                    <div className="slider-value">{interactiveValue}</div>
                   </div>
-                ))}
-              </div>
+                </div>
+              ) : (
+                // Options list UI
+                <>
+                  <div className="options-header">{context}</div>
+                  <div className="options-list">
+                    {options.map((option, idx) => (
+                      <div
+                        key={idx}
+                        className={`option-item ${option === interactiveValue ? 'selected' : ''}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOptionSelect(option);
+                        }}
+                      >
+                        {option}
+                        {option === interactiveValue && <span className="checkmark">✓</span>}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )}
         </span>
@@ -184,9 +242,23 @@ const InteractiveSuggestion = ({ suggestion, iconName, onSubmit }) => {
     );
   };
 
+  // Handle button click - ensure we only pass the text string
+  const handleButtonClick = (e) => {
+    // Don't trigger if clicking inside the popup
+    if (showOptions) {
+      return;
+    }
+
+    // Ensure we're passing a clean string
+    const textToSubmit = String(currentText);
+    console.log('[InteractiveSuggestion] Submitting:', textToSubmit);
+
+    onSubmit(textToSubmit, e);
+  };
+
   return (
     <button
-      onClick={(e) => onSubmit(currentText, e)}
+      onClick={handleButtonClick}
       className="suggestion-button flex items-start gap-2 text-left text-blue-600 hover:text-blue-800 hover:underline cursor-pointer p-2"
     >
       <img

@@ -918,16 +918,101 @@ WHEN NOT TO USE:
 
                 // Use word boundary regex to avoid substring matches
                 // Match the value as a whole word (not part of another word)
-                const regex = new RegExp(`\\b${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-                const match = sug.text.match(regex);
+                const regex = new RegExp(`\\b${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'ig');
+                let match;
 
-                if (match) {
+                // Find all matches of this value
+                while ((match = regex.exec(sug.text)) !== null) {
                   const valueIndex = match.index;
+                  const matchedValue = match[0];
 
+                  // === SEMANTIC FILTERING: Check if this match is truly interactive ===
+
+                  const beforeMatch = sug.text.substring(Math.max(0, valueIndex - 50), valueIndex);
+                  const afterMatch = sug.text.substring(valueIndex + matchedValue.length, Math.min(sug.text.length, valueIndex + matchedValue.length + 50));
+                  const contextBefore = sug.text.substring(Math.max(0, valueIndex - 80), valueIndex);
+                  const fullContext = sug.text.substring(Math.max(0, valueIndex - 100), Math.min(sug.text.length, valueIndex + matchedValue.length + 100));
+
+                  // 1. Check if value is in parentheses with other values (explanatory list)
+                  const inParenList = beforeMatch.includes('(') && !beforeMatch.includes(')') &&
+                                     (afterMatch.includes(',') || beforeMatch.includes(','));
+
+                  if (inParenList) {
+                    console.log(`[/api/chat] Skipping "${matchedValue}" - in parenthetical list (explanatory)`);
+                    continue;
+                  }
+
+                  // 2. Detect GROUP BY / aggregation operations (showing ALL categories, not filtering to one)
+                  const groupByPattern = /\b(by|across|among|between)\s+(\w+\s+)?(categories?|types?|groups?|statuses?|stages?)\b/i;
+                  const isGroupByOperation = groupByPattern.test(contextBefore);
+
+                  if (isGroupByOperation) {
+                    console.log(`[/api/chat] Skipping "${matchedValue}" - part of GROUP BY operation (showing all categories)`);
+                    continue;
+                  }
+
+                  // 3. Check for aggregation verbs followed by "by COLUMN" pattern
+                  const aggregationByPattern = /\b(count|sum|average|mean|median|group|plot|chart|compare|show|visualize)\s+.*?\s+by\s+\w+/i;
+                  if (aggregationByPattern.test(contextBefore)) {
+                    console.log(`[/api/chat] Skipping "${matchedValue}" - part of aggregation BY clause (showing all values)`);
+                    continue;
+                  }
+
+                  // 4. Cardinality check: If column has very few values (≤3) and multiple are mentioned, it's comparative
+                  const totalValuesInColumn = col.values.length;
+                  if (totalValuesInColumn <= 3) {
+                    // Check if multiple values from this column appear in the suggestion
+                    let mentionedCount = 0;
+                    for (const otherValue of col.values) {
+                      const otherRegex = new RegExp(`\\b${otherValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+                      if (otherRegex.test(fullContext)) {
+                        mentionedCount++;
+                      }
+                    }
+
+                    // If 2+ values mentioned from a 3-value column, this is comparative (showing all)
+                    if (mentionedCount >= 2) {
+                      console.log(`[/api/chat] Skipping "${matchedValue}" - low cardinality column (${totalValuesInColumn} values) with ${mentionedCount} mentioned (comparative analysis)`);
+                      continue;
+                    }
+                  }
+
+                  // 5. Check if multiple values from same column appear together anywhere in suggestion
+                  let multipleValuesFromSameColumn = false;
+                  for (const otherValue of col.values) {
+                    if (otherValue === value) continue;
+
+                    const nearbyText = sug.text.substring(Math.max(0, valueIndex - 50), Math.min(sug.text.length, valueIndex + matchedValue.length + 50));
+                    const otherRegex = new RegExp(`\\b${otherValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+                    if (otherRegex.test(nearbyText)) {
+                      multipleValuesFromSameColumn = true;
+                      break;
+                    }
+                  }
+
+                  if (multipleValuesFromSameColumn) {
+                    console.log(`[/api/chat] Skipping "${matchedValue}" - appears with other values from same column (listing options)`);
+                    continue;
+                  }
+
+                  // 6. Look for FILTERING prepositions that indicate a choice (for, where, with specific)
+                  // These indicate we're selecting ONE subset, not showing all
+                  const filteringPattern = /\b(for|where|focusing on|limited to|only|specific|particular)\s+[\w\s]{0,20}$/i;
+                  const hasFilteringContext = filteringPattern.test(contextBefore);
+
+                  // 7. REQUIRE filtering context if we detect any aggregation/grouping language
+                  const hasAggregationLanguage = /\b(distribution|comparison|count|across|by|all|each)\b/i.test(contextBefore);
+
+                  if (hasAggregationLanguage && !hasFilteringContext) {
+                    console.log(`[/api/chat] Skipping "${matchedValue}" - has aggregation language but no filtering context`);
+                    continue;
+                  }
+
+                  // This match passed all semantic filters - it's truly interactive
                   // Keep track of the best match (prefer earlier matches, then from priority columns)
                   if (!bestMatch || valueIndex < bestMatch.index) {
                     bestMatch = {
-                      value: match[0],  // Use actual matched text (preserves case)
+                      value: matchedValue,  // Use actual matched text (preserves case)
                       column: col,
                       index: valueIndex
                     };
@@ -950,6 +1035,59 @@ WHEN NOT TO USE:
               };
 
               console.log(`[/api/chat] Made suggestion interactive with value "${bestMatch.value}" from column ${bestMatch.column.name}`);
+            }
+          }
+        }
+
+        // Add numeric sliders for suggestions that don't already have interactive elements
+        console.log('[/api/chat] Checking for numeric values to make interactive...');
+        for (const sug of parsedSuggestions) {
+          // Skip if already has interactive element (categorical value)
+          if (sug.interactive) continue;
+
+          // Look for numeric values in common patterns
+          const numericPatterns = [
+            // "first/top/bottom N rows/countries/items"
+            { regex: /\b(?:first|top|bottom|last)\s+(\d+)\s+(?:rows?|countries?|items?|records?|entries?|values?|results?)\b/i, context: 'Number of items', min: 1, max: 100, step: 1 },
+            // "N bins/groups/clusters"
+            { regex: /\b(\d+)\s+(?:bins?|groups?|clusters?)\b/i, context: 'Number of bins', min: 5, max: 100, step: 5 },
+            // "sample N% / N percent"
+            { regex: /\bsample\s+(\d+)\s*%?\s*(?:percent)?\b/i, context: 'Sample percentage', min: 1, max: 100, step: 1 },
+            // "threshold of N" or "threshold = N"
+            { regex: /\bthreshold\s+(?:of\s+|=\s*)?(\d+(?:\.\d+)?)\b/i, context: 'Threshold value', min: 0, max: 1, step: 0.1 },
+            // Generic "N items" at the start of suggestion
+            { regex: /^(?:show|display|plot|create)\s+.*?\s+(\d+)\s+/i, context: 'Number of items', min: 1, max: 100, step: 1 }
+          ];
+
+          for (const pattern of numericPatterns) {
+            const match = sug.text.match(pattern.regex);
+            if (match) {
+              const numericValue = match[1];
+              const valueIndex = match.index + match[0].indexOf(numericValue);
+
+              // Determine appropriate min/max based on the actual value
+              let min = pattern.min;
+              let max = pattern.max;
+              const step = pattern.step;
+              const numValue = parseFloat(numericValue);
+
+              // Adjust max if the current value suggests a larger range
+              if (numValue > max) {
+                max = Math.ceil(numValue * 2);
+              }
+
+              sug.interactive = {
+                type: 'slider',
+                context: pattern.context,
+                min: min,
+                max: max,
+                step: step,
+                start: valueIndex,
+                end: valueIndex + numericValue.length
+              };
+
+              console.log(`[/api/chat] Made suggestion numeric slider with value "${numericValue}" (${pattern.context})`);
+              break; // Only add one interactive element per suggestion
             }
           }
         }
