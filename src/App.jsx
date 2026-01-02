@@ -1799,31 +1799,38 @@ Please respond with a JSON object in this format:
                     and generate insights using R code.
                   </p>
 
-                  {/* Startup suggestions */}
-                  <div className="mt-4" style={{ fontSize: '10pt' }}>
-                    <div className="grid grid-cols-2 gap-3">
-                      {[
-                        'Create a dot plot for mileage vs horsepower using mtcars color the dots on a gradient from red to blue',
-                        'Show the first 25 rows of mtcars',
-                        'Create a histogram of vehicle weights from mtcars',
-                        'Load Air_Quality.csv and show first 25 rows formatted with gt'
-                      ].map((suggestion, index) => {
-                        const iconName = getSuggestionIcon(suggestion);
-                        return (
-                          <button
-                            key={index}
-                            onClick={(e) => handleSuggestionClick(suggestion, e)}
-                            className="suggestion-button flex items-start gap-2 text-left text-blue-600 hover:text-blue-800 hover:underline cursor-pointer p-2"
-                          >
-                            <img
-                              src={`/${iconName}.svg`}
-                              alt={iconName}
-                              className="w-8 h-8 flex-shrink-0"
-                            />
-                            <span className="break-words">{suggestion}</span>
-                          </button>
-                        );
-                      })}
+                  {/* Data loading options */}
+                  <div className="mt-8">
+                    <p className="text-sm mb-4 text-gray-500">Get started by loading some data</p>
+
+                    <div className="flex flex-row justify-center items-center gap-8">
+                      {/* Snowflake Data */}
+                      <button
+                        onClick={() => setShowSnowflakeModal(true)}
+                        className="data-source-button flex flex-col items-center gap-2 cursor-pointer transition-all"
+                      >
+                        <img
+                          src="/snowflake-bug-color-rgb.svg"
+                          alt="Snowflake"
+                          className="transition-transform duration-200"
+                          style={{ width: '34px', height: '34px' }}
+                        />
+                        <span className="text-sm text-gray-500">Snowflake Data</span>
+                      </button>
+
+                      {/* Local Data */}
+                      <button
+                        onClick={handleOpenDataset}
+                        className="data-source-button flex flex-col items-center gap-2 cursor-pointer transition-all"
+                      >
+                        <img
+                          src="/local-files.svg"
+                          alt="Local Files"
+                          className="transition-transform duration-200"
+                          style={{ width: '34px', height: '34px' }}
+                        />
+                        <span className="text-sm text-gray-500">Local Data</span>
+                      </button>
                     </div>
                   </div>
                 </div>

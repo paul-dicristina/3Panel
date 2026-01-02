@@ -808,14 +808,14 @@ cat(toJSON(all_items, auto_unbox = TRUE))
           <div className="flex gap-4">
             <button
               onClick={onClose}
-              className="w-24 h-8 px-4 bg-white border border-gray-300 rounded-md hover:bg-gray-100 flex items-center justify-center"
+              className="w-24 h-8 px-4 bg-white border border-gray-300 rounded-md hover:bg-gray-100 flex items-center justify-center text-sm"
             >
               Cancel
             </button>
             <button
               onClick={handleLoad}
               disabled={selectedItems.length === 0}
-              className="w-24 h-8 px-4 bg-[#3686c1] text-white rounded-md hover:bg-[#2a6a9a] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+              className="w-24 h-8 px-4 bg-[#3686c1] text-white rounded-md hover:bg-[#2a6a9a] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center text-sm"
             >
               Open
             </button>
