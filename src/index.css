@@ -181,6 +181,9 @@ code {
   padding: 0 2px;
   border-radius: 2px;
   transition: background-color 0.2s ease;
+  /* Prevent layout shift from changing text length */
+  display: inline-block;
+  min-width: fit-content;
 }
 
 .interactive-value:hover {
@@ -188,10 +191,7 @@ code {
 }
 
 .options-popup {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  margin-top: 4px;
+  position: fixed;
   background: white;
   border: 1px solid #d7dadc;
   border-radius: 8px;
@@ -200,14 +200,13 @@ code {
   min-width: 150px;
   max-width: 250px;
   padding: 4px;
-  animation: popup-appear 0.15s ease-out;
+  /* Remove animation to prevent jittering */
+  /* Prevent any layout changes in parent */
+  pointer-events: auto;
 }
 
 .options-popup-above {
-  top: auto;
-  bottom: 100%;
-  margin-top: 0;
-  margin-bottom: 4px;
+  /* Position will be set via inline styles */
 }
 
 @keyframes popup-appear {
@@ -277,6 +276,11 @@ code {
   padding: 8px 12px;
 }
 
+/* Year range popup needs more width */
+.slider-popup:has(.year-range-control) {
+  min-width: 300px;
+}
+
 .slider-container {
   display: flex;
   flex-direction: column;
@@ -341,4 +345,74 @@ code {
   font-weight: 600;
   color: #3686c1;
   text-align: center;
+}
+
+/* Year Range Slider (dual-thumb) */
+.year-range-control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 280px;
+}
+
+.year-range-labels {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+  padding: 0 8px;
+}
+
+.year-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: #3686c1;
+}
+
+.dual-slider-container {
+  position: relative;
+  height: 24px;
+  display: flex;
+  align-items: center;
+}
+
+/* Stack the two range inputs on top of each other */
+.dual-slider-container input[type="range"] {
+  position: absolute;
+  width: 100%;
+  pointer-events: none;
+}
+
+.dual-slider-container input[type="range"]::-webkit-slider-thumb {
+  pointer-events: all;
+  position: relative;
+  z-index: 1;
+}
+
+.dual-slider-container input[type="range"]::-moz-range-thumb {
+  pointer-events: all;
+  position: relative;
+  z-index: 1;
+}
+
+/* Make the track transparent for the second slider so we only see one track */
+.dual-slider-container .range-max {
+  background: transparent;
+}
+
+.dual-slider-container .range-max::-webkit-slider-runnable-track {
+  background: transparent;
+}
+
+.dual-slider-container .range-max::-moz-range-track {
+  background: transparent;
+}
+
+/* Style the max thumb slightly different so users can tell them apart */
+.dual-slider-container .range-max::-webkit-slider-thumb {
+  background: #2a6a9a;
+}
+
+.dual-slider-container .range-max::-moz-range-thumb {
+  background: #2a6a9a;
 }

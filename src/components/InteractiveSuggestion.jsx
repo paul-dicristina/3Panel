@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 /**
  * InteractiveSuggestion Component
@@ -54,6 +54,9 @@ const InteractiveSuggestion = ({ suggestion, iconName, onSubmit }) => {
     };
   }, [showOptions, hoverTimeout]);
 
+  // Track popup inline styles for fixed positioning
+  const [popupStyles, setPopupStyles] = useState({});
+
   // Calculate popup position to avoid overflow
   useEffect(() => {
     if (!showOptions || !interactiveRef.current || !popupRef.current) return;
@@ -61,21 +64,50 @@ const InteractiveSuggestion = ({ suggestion, iconName, onSubmit }) => {
     const interactiveRect = interactiveRef.current.getBoundingClientRect();
     const popupRect = popupRef.current.getBoundingClientRect();
     const viewportHeight = window.innerHeight;
+    const viewportWidth = window.innerWidth;
 
     // Check if popup would overflow below
     const spaceBelow = viewportHeight - interactiveRect.bottom;
     const spaceAbove = interactiveRect.top;
 
-    // If not enough space below but more space above, position above
+    // Calculate position
+    let top, left;
+    let position;
+
     if (spaceBelow < popupRect.height && spaceAbove > spaceBelow) {
-      setPopupPosition('above');
+      // Position above
+      top = interactiveRect.top - popupRect.height - 4;
+      position = 'above';
     } else {
-      setPopupPosition('below');
+      // Position below
+      top = interactiveRect.bottom + 4;
+      position = 'below';
     }
+
+    // Center horizontally on the interactive element
+    left = interactiveRect.left + (interactiveRect.width / 2) - (popupRect.width / 2);
+
+    // Ensure popup stays within viewport horizontally
+    if (left < 8) left = 8;
+    if (left + popupRect.width > viewportWidth - 8) {
+      left = viewportWidth - popupRect.width - 8;
+    }
+
+    // Ensure popup stays within viewport vertically
+    if (top < 8) top = 8;
+    if (top + popupRect.height > viewportHeight - 8) {
+      top = viewportHeight - popupRect.height - 8;
+    }
+
+    setPopupPosition(position);
+    setPopupStyles({
+      top: `${top}px`,
+      left: `${left}px`
+    });
   }, [showOptions]);
 
   // Handle option selection
-  const handleOptionSelect = (newValue) => {
+  const handleOptionSelect = useCallback((newValue) => {
     if (!interactive || !interactivePositions) return;
 
     const { start, end } = interactivePositions;
@@ -97,10 +129,10 @@ const InteractiveSuggestion = ({ suggestion, iconName, onSubmit }) => {
       clearTimeout(hoverTimeout);
       setHoverTimeout(null);
     }
-  };
+  }, [interactive, interactivePositions, currentText, hoverTimeout]);
 
   // Handle slider value change
-  const handleSliderChange = (e) => {
+  const handleSliderChange = useCallback((e) => {
     e.stopPropagation(); // Prevent event from bubbling up
     e.preventDefault();
 
@@ -119,34 +151,99 @@ const InteractiveSuggestion = ({ suggestion, iconName, onSubmit }) => {
       start: start,
       end: start + valueStr.length
     });
-  };
+  }, [interactive, interactivePositions, currentText]);
+
+  // Handle year range slider changes (dual-thumb)
+  const [yearRangeValues, setYearRangeValues] = useState(() => {
+    if (interactive && interactive.type === 'year-range') {
+      return { min: interactive.minValue, max: interactive.maxValue };
+    }
+    return null;
+  });
+
+  // Sync yearRangeValues when interactive changes
+  useEffect(() => {
+    if (interactive && interactive.type === 'year-range') {
+      setYearRangeValues({ min: interactive.minValue, max: interactive.maxValue });
+    }
+  }, [interactive]);
+
+  const handleYearRangeChange = useCallback((e, thumb) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    if (!interactive || !interactivePositions || !yearRangeValues) return;
+
+    const newValue = parseInt(e.target.value);
+    const { start, end } = interactivePositions;
+
+    // Update the appropriate value
+    let newMin = yearRangeValues.min;
+    let newMax = yearRangeValues.max;
+
+    if (thumb === 'min') {
+      newMin = Math.min(newValue, yearRangeValues.max); // Ensure min <= max
+    } else {
+      newMax = Math.max(newValue, yearRangeValues.min); // Ensure max >= min
+    }
+
+    setYearRangeValues({ min: newMin, max: newMax });
+
+    // Reconstruct the range text (e.g., "1950 to 1990")
+    const originalText = currentText.substring(start, end);
+    let rangeText;
+
+    // Detect the format used in the original text
+    if (/\bfrom\s+\d{4}\s+to\s+\d{4}\b/i.test(originalText)) {
+      rangeText = `from ${newMin} to ${newMax}`;
+    } else if (/\bbetween\s+\d{4}\s+and\s+\d{4}\b/i.test(originalText)) {
+      rangeText = `between ${newMin} and ${newMax}`;
+    } else if (/\d{4}\s*-\s*\d{4}/.test(originalText)) {
+      rangeText = `${newMin}-${newMax}`;
+    } else if (/\d{4}\s+to\s+\d{4}/i.test(originalText)) {
+      rangeText = `${newMin} to ${newMax}`;
+    } else {
+      rangeText = `${newMin} to ${newMax}`; // default
+    }
+
+    const newText = currentText.substring(0, start) + rangeText + currentText.substring(end);
+
+    // Update text
+    setCurrentText(newText);
+
+    // Recalculate positions for the new range text
+    setInteractivePositions({
+      start: start,
+      end: start + rangeText.length
+    });
+  }, [interactive, interactivePositions, currentText, yearRangeValues]);
 
   // Handle mouse enter on interactive element
-  const handleMouseEnter = () => {
+  const handleMouseEnter = useCallback(() => {
     // Small delay before showing options to avoid accidental triggers
     const timeout = setTimeout(() => {
       setShowOptions(true);
     }, 200);
     setHoverTimeout(timeout);
-  };
+  }, []);
 
   // Handle mouse leave from interactive element
-  const handleMouseLeave = () => {
+  const handleMouseLeave = useCallback(() => {
     if (hoverTimeout) {
       clearTimeout(hoverTimeout);
       setHoverTimeout(null);
     }
     // Don't auto-close - let the popup's own mouseleave handle it
-  };
+  }, [hoverTimeout]);
 
   // Handle mouse leave from popup
-  const handlePopupMouseLeave = () => {
+  const handlePopupMouseLeave = useCallback(() => {
     // Close after a short delay to allow moving between options
     const timeout = setTimeout(() => {
       setShowOptions(false);
     }, 150);
     setHoverTimeout(timeout);
-  };
+  }, []);
 
   // Render text with interactive element
   const renderText = () => {
@@ -155,12 +252,13 @@ const InteractiveSuggestion = ({ suggestion, iconName, onSubmit }) => {
     }
 
     const { start, end } = interactivePositions;
-    const { context, options, type, min, max, step } = interactive;
+    const { context, options, type, min, max, step, minValue, maxValue } = interactive;
     const before = currentText.substring(0, start);
     const interactiveValue = currentText.substring(start, end);
     const after = currentText.substring(end);
 
     const isSlider = type === 'slider';
+    const isYearRange = type === 'year-range';
 
     return (
       <span className="break-words">
@@ -175,7 +273,8 @@ const InteractiveSuggestion = ({ suggestion, iconName, onSubmit }) => {
           {showOptions && (
             <div
               ref={popupRef}
-              className={`options-popup ${popupPosition === 'above' ? 'options-popup-above' : ''} ${isSlider ? 'slider-popup' : ''}`}
+              className={`options-popup ${popupPosition === 'above' ? 'options-popup-above' : ''} ${isSlider || isYearRange ? 'slider-popup' : ''}`}
+              style={popupStyles}
               onClick={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
               onMouseUp={(e) => e.stopPropagation()}
@@ -189,8 +288,51 @@ const InteractiveSuggestion = ({ suggestion, iconName, onSubmit }) => {
               }}
               onMouseLeave={handlePopupMouseLeave}
             >
-              {isSlider ? (
-                // Slider UI
+              {isYearRange ? (
+                // Year Range Slider UI (dual-thumb)
+                <div
+                  className="slider-container"
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <div className="slider-header">{context}</div>
+                  <div className="year-range-control">
+                    <div className="year-range-labels">
+                      <span className="year-label">{yearRangeValues?.min || minValue}</span>
+                      <span className="year-label">{yearRangeValues?.max || maxValue}</span>
+                    </div>
+                    <div className="dual-slider-container">
+                      {/* Min year slider */}
+                      <input
+                        type="range"
+                        min={min || 1900}
+                        max={max || 2100}
+                        step={step || 1}
+                        value={yearRangeValues?.min || minValue}
+                        onChange={(e) => handleYearRangeChange(e, 'min')}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onMouseUp={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
+                        className="slider-input range-min"
+                      />
+                      {/* Max year slider */}
+                      <input
+                        type="range"
+                        min={min || 1900}
+                        max={max || 2100}
+                        step={step || 1}
+                        value={yearRangeValues?.max || maxValue}
+                        onChange={(e) => handleYearRangeChange(e, 'max')}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onMouseUp={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
+                        className="slider-input range-max"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : isSlider ? (
+                // Single Slider UI
                 <div
                   className="slider-container"
                   onClick={(e) => e.stopPropagation()}
@@ -243,7 +385,7 @@ const InteractiveSuggestion = ({ suggestion, iconName, onSubmit }) => {
   };
 
   // Handle button click - ensure we only pass the text string
-  const handleButtonClick = (e) => {
+  const handleButtonClick = useCallback((e) => {
     // Don't trigger if clicking inside the popup
     if (showOptions) {
       return;
@@ -254,7 +396,7 @@ const InteractiveSuggestion = ({ suggestion, iconName, onSubmit }) => {
     console.log('[InteractiveSuggestion] Submitting:', textToSubmit);
 
     onSubmit(textToSubmit, e);
-  };
+  }, [showOptions, currentText, onSubmit]);
 
   return (
     <button

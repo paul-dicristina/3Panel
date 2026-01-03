@@ -84,6 +84,11 @@ app.post('/api/chat', async (req, res) => {
     console.log('[/api/chat] Request received');
     console.log('[/api/chat] suggestionsEnabled:', suggestionsEnabled);
     console.log('[/api/chat] columnMetadata present:', !!columnMetadata);
+    if (columnMetadata && columnMetadata.length > 0) {
+      console.log('[/api/chat] columnMetadata preview:', columnMetadata.slice(0, 5).map(c => `${c.name}(${c.type})`).join(', '), `... (${columnMetadata.length} total)`);
+      const hasYearColumn = columnMetadata.some(c => c.name === 'year');
+      console.log('[/api/chat] Has "year" column:', hasYearColumn);
+    }
     console.log('[/api/chat] messages count:', messages?.length);
 
     if (!apiKey) {
@@ -977,34 +982,26 @@ WHEN NOT TO USE:
                     }
                   }
 
-                  // 5. Check if multiple values from same column appear together anywhere in suggestion
-                  let multipleValuesFromSameColumn = false;
-                  for (const otherValue of col.values) {
-                    if (otherValue === value) continue;
+                  // 5. Check if multiple values from same column appear together in a list
+                  // Allow individual interactive elements for each value in a comparative list
+                  // Only skip if this is clearly a "showing all values" scenario (e.g., "group by country")
+                  // Lists like "Japan, USA, and UK" should have each country be interactive
 
-                    const nearbyText = sug.text.substring(Math.max(0, valueIndex - 50), Math.min(sug.text.length, valueIndex + matchedValue.length + 50));
-                    const otherRegex = new RegExp(`\\b${otherValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-                    if (otherRegex.test(nearbyText)) {
-                      multipleValuesFromSameColumn = true;
-                      break;
-                    }
-                  }
-
-                  if (multipleValuesFromSameColumn) {
-                    console.log(`[/api/chat] Skipping "${matchedValue}" - appears with other values from same column (listing options)`);
-                    continue;
-                  }
+                  // Skip this check - we want each value to be interactive even in lists
+                  // This allows users to swap out individual items from comparative analyses
 
                   // 6. Look for FILTERING prepositions that indicate a choice (for, where, with specific)
                   // These indicate we're selecting ONE subset, not showing all
                   const filteringPattern = /\b(for|where|focusing on|limited to|only|specific|particular)\s+[\w\s]{0,20}$/i;
                   const hasFilteringContext = filteringPattern.test(contextBefore);
 
-                  // 7. REQUIRE filtering context if we detect any aggregation/grouping language
-                  const hasAggregationLanguage = /\b(distribution|comparison|count|across|by|all|each)\b/i.test(contextBefore);
+                  // 7. Check for strong aggregation/grouping language that shows ALL values
+                  // But allow interactive elements for comparative lists (e.g., "plot Japan, USA, UK")
+                  const strongAggregationPattern = /\b(group\s+by|across\s+all|for\s+each|distribution\s+by)\b/i;
+                  const isStrongAggregation = strongAggregationPattern.test(contextBefore);
 
-                  if (hasAggregationLanguage && !hasFilteringContext) {
-                    console.log(`[/api/chat] Skipping "${matchedValue}" - has aggregation language but no filtering context`);
+                  if (isStrongAggregation && !hasFilteringContext) {
+                    console.log(`[/api/chat] Skipping "${matchedValue}" - has strong aggregation language (showing all values)`);
                     continue;
                   }
 
@@ -1045,12 +1042,86 @@ WHEN NOT TO USE:
           // Skip if already has interactive element (categorical value)
           if (sug.interactive) continue;
 
+          // First, check for year ranges (dual-thumb slider)
+          // Patterns like "1950 to 1990", "1950-1990", "from 1950 to 1990", "between 1950 and 1990"
+          const yearRangePatterns = [
+            /\b(?:from\s+)?(\d{4})\s+(?:to|-|through)\s+(\d{4})\b/i,
+            /\bbetween\s+(\d{4})\s+and\s+(\d{4})\b/i,
+            /\b(\d{4})\s*-\s*(\d{4})\b/
+          ];
+
+          let yearRangeMatch = null;
+          let yearRangePattern = null;
+
+          for (const pattern of yearRangePatterns) {
+            const match = sug.text.match(pattern);
+            if (match) {
+              const year1 = parseInt(match[1]);
+              const year2 = parseInt(match[2]);
+
+              // Accept any 4-digit numbers as potential years
+              // The actual validation will come from dataset metadata
+              if (/^\d{4}$/.test(match[1]) && /^\d{4}$/.test(match[2])) {
+                yearRangeMatch = match;
+                yearRangePattern = pattern;
+                break;
+              }
+            }
+          }
+
+          if (yearRangeMatch) {
+            const startYear = parseInt(yearRangeMatch[1]);
+            const endYear = parseInt(yearRangeMatch[2]);
+            const rangeIndex = yearRangeMatch.index;
+            const rangeText = yearRangeMatch[0];
+
+            // Default: use the detected years with some padding (no hardcoded limits)
+            let sliderMin = Math.floor(Math.min(startYear, endYear) / 10) * 10 - 20;
+            let sliderMax = Math.ceil(Math.max(startYear, endYear) / 10) * 10 + 20;
+
+            // Look for a year column in columnMetadata to get actual bounds
+            if (columnMetadata && columnMetadata.length > 0) {
+              console.log(`[/api/chat] Looking for year column in columnMetadata with ${columnMetadata.length} columns`);
+              console.log(`[/api/chat] Available columns:`, columnMetadata.map(c => `${c.name}(${c.type}${c.min !== undefined ? `,${c.min}-${c.max}` : ''})`).join(', '));
+
+              const yearColumn = columnMetadata.find(col =>
+                col.type === 'numeric' && /^year$/i.test(col.name) && col.min !== undefined && col.max !== undefined
+              );
+
+              if (yearColumn) {
+                // Use the actual dataset min/max
+                sliderMin = Math.floor(yearColumn.min);
+                sliderMax = Math.ceil(yearColumn.max);
+                console.log(`[/api/chat] ✓ Found year column with range ${yearColumn.min}-${yearColumn.max}, using ${sliderMin}-${sliderMax}`);
+              } else {
+                console.log(`[/api/chat] ✗ No year column found in metadata, using calculated range ${sliderMin}-${sliderMax}`);
+              }
+            } else {
+              console.log(`[/api/chat] No columnMetadata available, using calculated range ${sliderMin}-${sliderMax}`);
+            }
+
+            sug.interactive = {
+              type: 'year-range',
+              context: 'Year Range',
+              minValue: Math.min(startYear, endYear),
+              maxValue: Math.max(startYear, endYear),
+              min: sliderMin,
+              max: sliderMax,
+              step: 1,
+              start: rangeIndex,
+              end: rangeIndex + rangeText.length
+            };
+
+            console.log(`[/api/chat] Made suggestion year range slider with "${rangeText}" (${startYear}-${endYear}), bounds ${sliderMin}-${sliderMax}`);
+            continue; // Move to next suggestion
+          }
+
           // Look for numeric values in common patterns
           const numericPatterns = [
-            // "first/top/bottom N rows/countries/items"
-            { regex: /\b(?:first|top|bottom|last)\s+(\d+)\s+(?:rows?|countries?|items?|records?|entries?|values?|results?)\b/i, context: 'Number of items', min: 1, max: 100, step: 1 },
+            // "first/top/bottom N rows/countries/items" - capture the item name
+            { regex: /\b(?:first|top|bottom|last)\s+(\d+)\s+(rows?|countries?|items?|records?|entries?|values?|results?|cities?|states?|products?|customers?|users?)\b/i, extractName: true, min: 1, max: 100, step: 1 },
             // "N bins/groups/clusters"
-            { regex: /\b(\d+)\s+(?:bins?|groups?|clusters?)\b/i, context: 'Number of bins', min: 5, max: 100, step: 5 },
+            { regex: /\b(\d+)\s+(bins?|groups?|clusters?)\b/i, extractName: true, min: 5, max: 100, step: 5 },
             // "sample N% / N percent"
             { regex: /\bsample\s+(\d+)\s*%?\s*(?:percent)?\b/i, context: 'Sample percentage', min: 1, max: 100, step: 1 },
             // "threshold of N" or "threshold = N"
@@ -1064,21 +1135,74 @@ WHEN NOT TO USE:
             if (match) {
               const numericValue = match[1];
               const valueIndex = match.index + match[0].indexOf(numericValue);
-
-              // Determine appropriate min/max based on the actual value
-              let min = pattern.min;
-              let max = pattern.max;
-              const step = pattern.step;
               const numValue = parseFloat(numericValue);
 
-              // Adjust max if the current value suggests a larger range
-              if (numValue > max) {
-                max = Math.ceil(numValue * 2);
+              // Check if this is a year value (any 4-digit number)
+              const isYear = /^\d{4}$/.test(numericValue);
+
+              let context, min, max, step;
+
+              if (isYear) {
+                // For year values, use "Year" as context and determine bounds from dataset
+                context = 'Year';
+                // Default: use the detected year with some padding (no hardcoded limits)
+                min = Math.floor(numValue / 10) * 10 - 20;
+                max = Math.ceil(numValue / 10) * 10 + 20;
+                step = 1;
+
+                // Try to find the year column in columnMetadata to get actual bounds
+                if (columnMetadata && columnMetadata.length > 0) {
+                  console.log(`[/api/chat] Looking for year column for single year value "${numericValue}"`);
+                  console.log(`[/api/chat] Available columns:`, columnMetadata.map(c => `${c.name}(${c.type}${c.min !== undefined ? `,${c.min}-${c.max}` : ''})`).join(', '));
+
+                  // Look for year-like column names
+                  const yearColumn = columnMetadata.find(col =>
+                    col.type === 'numeric' && /^year$/i.test(col.name) && col.min !== undefined && col.max !== undefined
+                  );
+
+                  if (yearColumn) {
+                    // Use the actual dataset min/max
+                    min = Math.floor(yearColumn.min);
+                    max = Math.ceil(yearColumn.max);
+                    console.log(`[/api/chat] ✓ Found year column with range ${yearColumn.min}-${yearColumn.max}, using ${min}-${max}`);
+                  } else {
+                    console.log(`[/api/chat] ✗ No year column found, using calculated range ${min}-${max}`);
+                  }
+                } else {
+                  console.log(`[/api/chat] No columnMetadata, using calculated range ${min}-${max} for year value "${numericValue}"`);
+                }
+
+                console.log(`[/api/chat] Detected year value "${numericValue}", using range ${min}-${max}`);
+              } else if (pattern.extractName && match[2]) {
+                // Extract the item name from the pattern (e.g., "countries", "bins")
+                const itemName = match[2].toLowerCase();
+                // Singularize if plural (simple approach - remove trailing 's')
+                const singularName = itemName.endsWith('s') ? itemName.slice(0, -1) : itemName;
+                context = `Number of ${singularName}s`;
+                min = pattern.min;
+                max = pattern.max;
+                step = pattern.step;
+
+                // Adjust max if the current value suggests a larger range
+                if (numValue > max) {
+                  max = Math.ceil(numValue * 2);
+                }
+              } else {
+                // Use the pattern's default context
+                context = pattern.context;
+                min = pattern.min;
+                max = pattern.max;
+                step = pattern.step;
+
+                // Adjust max if the current value suggests a larger range
+                if (numValue > max) {
+                  max = Math.ceil(numValue * 2);
+                }
               }
 
               sug.interactive = {
                 type: 'slider',
-                context: pattern.context,
+                context: context,
                 min: min,
                 max: max,
                 step: step,
@@ -1086,7 +1210,7 @@ WHEN NOT TO USE:
                 end: valueIndex + numericValue.length
               };
 
-              console.log(`[/api/chat] Made suggestion numeric slider with value "${numericValue}" (${pattern.context})`);
+              console.log(`[/api/chat] Made suggestion numeric slider with value "${numericValue}" (${context})`);
               break; // Only add one interactive element per suggestion
             }
           }
@@ -1164,6 +1288,35 @@ app.post('/api/execute-r', async (req, res) => {
 
     console.log('Auto format tabular:', autoFormatTabular);
     console.log('Refresh metadata:', refreshMetadata, 'for dataset:', activeDataset);
+
+    // Try to detect which dataset was actually created/modified by parsing the R code
+    // Look for assignment operations like: variable_name <- ...
+    // Handle various patterns: at start of line, with whitespace, or in pipe chains
+    let detectedDataset = activeDataset;
+    if (refreshMetadata) {
+      // Try multiple patterns to detect dataset assignment
+      const patterns = [
+        /^(\w+)\s*<-/m,                           // Start of line: dataset <- ...
+        /^\s*(\w+)\s*<-/m,                         // With leading whitespace: dataset <- ...
+        /(?:^|[;\n])\s*(\w+)\s*<-\s*\w+\s*%>%/m,  // Pipe chain: dataset <- data %>% ...
+      ];
+
+      for (const pattern of patterns) {
+        const match = code.match(pattern);
+        if (match) {
+          detectedDataset = match[1];
+          console.log(`[DATASET DETECTION] Detected assignment to '${detectedDataset}' from R code`);
+          break;
+        }
+      }
+
+      // If no match, log for debugging
+      if (detectedDataset === activeDataset) {
+        console.log(`[DATASET DETECTION] No dataset assignment detected, using activeDataset: ${activeDataset}`);
+        // Try to show first 200 chars of code for debugging
+        console.log(`[DATASET DETECTION] Code preview: ${code.substring(0, 200)}`);
+      }
+    }
 
     // Create temp directory if it doesn't exist
     try {
@@ -1482,10 +1635,10 @@ save.image("${workspacePath.replace(/\\/g, '/')}")
         // Refresh metadata if requested
         if (refreshMetadata && !result.error) {
           try {
-            console.log(`[METADATA REFRESH] Refreshing metadata for dataset: ${activeDataset}`);
+            console.log(`[METADATA REFRESH] Refreshing metadata for dataset: ${detectedDataset}`);
 
             // Check if dataset exists
-            const checkCode = `exists("${activeDataset}")`;
+            const checkCode = `exists("${detectedDataset}")`;
             const checkScriptPath = join(tempDir, `check_${timestamp}.R`);
             const checkWrapperCode = `
 # Set working directory to data folder
@@ -1511,7 +1664,7 @@ cat(${checkCode})
               // Dataset exists, get updated metadata
               const metadataCode = `
 # Check if dataset exists and is valid
-if (!exists("${activeDataset}") || is.null(${activeDataset})) {
+if (!exists("${detectedDataset}") || is.null(${detectedDataset})) {
   list(
     error = "Dataset does not exist or is NULL",
     ncol = 0,
@@ -1524,9 +1677,10 @@ if (!exists("${activeDataset}") || is.null(${activeDataset})) {
   # Analyze categorical columns
   categorical_info <- list()
   numeric_cols <- c()
+  numeric_info <- list()
 
-  for (col_name in names(${activeDataset})) {
-    col_data <- ${activeDataset}[[col_name]]
+  for (col_name in names(${detectedDataset})) {
+    col_data <- ${detectedDataset}[[col_name]]
 
     if (is.factor(col_data) || is.character(col_data)) {
       n_unique <- length(unique(na.omit(col_data)))
@@ -1536,16 +1690,25 @@ if (!exists("${activeDataset}") || is.null(${activeDataset})) {
       }
     } else if (is.numeric(col_data)) {
       numeric_cols <- c(numeric_cols, col_name)
+      # Calculate min/max for numeric columns
+      clean_data <- na.omit(col_data)
+      if (length(clean_data) > 0) {
+        numeric_info[[col_name]] <- list(
+          min = min(clean_data),
+          max = max(clean_data)
+        )
+      }
     }
   }
 
   # Return structure info
   list(
-    ncol = ncol(${activeDataset}),
-    nrow = nrow(${activeDataset}),
-    colnames = names(${activeDataset}),
+    ncol = ncol(${detectedDataset}),
+    nrow = nrow(${detectedDataset}),
+    colnames = names(${detectedDataset}),
     categoricalInfo = categorical_info,
-    numericCols = numeric_cols
+    numericCols = numeric_cols,
+    numericInfo = numeric_info
   )
 }
 `;
@@ -1589,6 +1752,8 @@ cat(toJSON(result, auto_unbox = TRUE))
                       }
 
                       const parsed = JSON.parse(jsonStr);
+                      // Log what we got from R
+                      console.log('[METADATA REFRESH] Parsed result - numericCols:', parsed.numericCols?.length || 0, 'numericInfo keys:', Object.keys(parsed.numericInfo || {}).length);
                       resolve(parsed);
                     } catch (parseErr) {
                       console.error('[METADATA REFRESH] Parse error:', parseErr);
@@ -1623,10 +1788,16 @@ cat(toJSON(result, auto_unbox = TRUE))
                       values: metadataResult.categoricalInfo[colName]
                     });
                   } else if (metadataResult.numericCols && metadataResult.numericCols.includes(colName)) {
-                    columnMetadata.push({
+                    const numericMeta = {
                       name: colName,
                       type: 'numeric'
-                    });
+                    };
+                    // Add min/max if available
+                    if (metadataResult.numericInfo && metadataResult.numericInfo[colName]) {
+                      numericMeta.min = metadataResult.numericInfo[colName].min;
+                      numericMeta.max = metadataResult.numericInfo[colName].max;
+                    }
+                    columnMetadata.push(numericMeta);
                   } else {
                     columnMetadata.push({
                       name: colName,
@@ -1637,7 +1808,7 @@ cat(toJSON(result, auto_unbox = TRUE))
 
                 // Add metadata to result
                 result.updatedMetadata = {
-                  datasetName: activeDataset,
+                  datasetName: detectedDataset,
                   columnMetadata: columnMetadata,
                 hash: JSON.stringify({
                   ncol: metadataResult.ncol,
@@ -1646,11 +1817,20 @@ cat(toJSON(result, auto_unbox = TRUE))
                 })
               };
 
-                console.log(`[METADATA REFRESH] Successfully refreshed metadata for '${activeDataset}'`);
-                console.log(`[METADATA REFRESH] Columns: ${columnMetadata.length}, Categorical: ${columnMetadata.filter(c => c.type === 'categorical').length}`);
+                console.log(`[METADATA REFRESH] Successfully refreshed metadata for '${detectedDataset}'`);
+                console.log(`[METADATA REFRESH] Columns: ${columnMetadata.length}, Categorical: ${columnMetadata.filter(c => c.type === 'categorical').length}, Numeric: ${columnMetadata.filter(c => c.type === 'numeric').length}`);
+
+                // Log numeric columns with their ranges
+                const numericWithRanges = columnMetadata.filter(c => c.type === 'numeric' && c.min !== undefined && c.max !== undefined);
+                if (numericWithRanges.length > 0) {
+                  console.log(`[METADATA REFRESH] Numeric columns with ranges:`);
+                  numericWithRanges.forEach(col => {
+                    console.log(`  - ${col.name}: ${col.min} to ${col.max}`);
+                  });
+                }
               }
             } else {
-              console.log(`[METADATA REFRESH] Dataset '${activeDataset}' does not exist in workspace`);
+              console.log(`[METADATA REFRESH] Dataset '${detectedDataset}' does not exist in workspace`);
             }
           } catch (metadataError) {
             console.error('[METADATA REFRESH] Failed to refresh metadata:', metadataError);
@@ -1906,6 +2086,22 @@ for (col_name in names(${baseFilename})) {
     }
   }
 }
+cat("\\n")
+
+# Extract min/max for numeric columns (for interactive sliders)
+cat("Numeric column ranges:\\n")
+for (col_name in names(${baseFilename})) {
+  col_data <- ${baseFilename}[[col_name]]
+  # Check if column is numeric
+  if (is.numeric(col_data)) {
+    clean_data <- na.omit(col_data)
+    if (length(clean_data) > 0) {
+      min_val <- min(clean_data)
+      max_val <- max(clean_data)
+      cat(paste0("$ ", col_name, ": ", min_val, " to ", max_val, "\\n"))
+    }
+  }
+}
 cat("\\n")`;
 
     // ==== Execute the diagnostic R code ====
@@ -1995,6 +2191,23 @@ save.image(workspace_path)
             col.values = valuesStr.split(',')
               .map(v => v.trim())
               .filter(v => v && v !== '...');
+          }
+        }
+      }
+
+      // Parse numeric column ranges
+      const numericMatch = rOutput.stdout.match(/Numeric column ranges:[\s\S]*?(?=\n\n|$)/);
+      if (numericMatch) {
+        const numericText = numericMatch[0];
+        // Format: $ colname: min to max
+        const rangeMatches = numericText.matchAll(/\$ (\w+): ([\d.eE+-]+) to ([\d.eE+-]+)/g);
+        for (const match of rangeMatches) {
+          const [, colName, minStr, maxStr] = match;
+          // Find this column in metadata and add min/max
+          const col = columnMetadata.find(c => c.name === colName);
+          if (col) {
+            col.min = parseFloat(minStr);
+            col.max = parseFloat(maxStr);
           }
         }
       }
@@ -2472,6 +2685,22 @@ for (col_name in names(${varName})) {
     }
   }
 }
+cat("\\n")
+
+# Extract min/max for numeric columns (for interactive sliders)
+cat("Numeric column ranges:\\n")
+for (col_name in names(${varName})) {
+  col_data <- ${varName}[[col_name]]
+  # Check if column is numeric
+  if (is.numeric(col_data)) {
+    clean_data <- na.omit(col_data)
+    if (length(clean_data) > 0) {
+      min_val <- min(clean_data)
+      max_val <- max(clean_data)
+      cat(paste0("$ ", col_name, ": ", min_val, " to ", max_val, "\\n"))
+    }
+  }
+}
 cat("\\n")`;
 
     // ==== Execute the diagnostic R code ====
@@ -2558,6 +2787,23 @@ save.image(workspace_path)
             col.values = valuesStr.split(',')
               .map(v => v.trim())
               .filter(v => v && v !== '...');
+          }
+        }
+      }
+
+      // Parse numeric column ranges
+      const numericMatch = rOutput.stdout.match(/Numeric column ranges:[\s\S]*?(?=\n\n|$)/);
+      if (numericMatch) {
+        const numericText = numericMatch[0];
+        // Format: $ colname: min to max
+        const rangeMatches = numericText.matchAll(/\$ (\w+): ([\d.eE+-]+) to ([\d.eE+-]+)/g);
+        for (const match of rangeMatches) {
+          const [, colName, minStr, maxStr] = match;
+          // Find this column in metadata and add min/max
+          const col = columnMetadata.find(c => c.name === colName);
+          if (col) {
+            col.min = parseFloat(minStr);
+            col.max = parseFloat(maxStr);
           }
         }
       }

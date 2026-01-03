@@ -510,7 +510,7 @@ Please respond with a JSON object in this format:
     // Get favorited cards with their outputs
     const favoritedCards = codeCards.filter(card => favoritedCardIds.has(card.id));
 
-    // Debug: log card outputs to console
+    // Debug: log card outputs to console (avoid circular references from DOM elements)
     console.log('Favorited cards for report:', favoritedCards.map(card => ({
       id: card.id,
       hasOutput: !!card.output,
@@ -518,15 +518,8 @@ Please respond with a JSON object in this format:
       hasTables: !!card.output?.tables,
       tableCount: card.output?.tables?.length || 0,
       hasPlots: !!card.output?.plots,
-      plotCount: card.output?.plots?.length || 0,
-      // Check the actual card.output structure
-      fullOutput: card.output
+      plotCount: card.output?.plots?.length || 0
     })));
-
-    // Also log the raw first card's output structure
-    if (favoritedCards.length > 0) {
-      console.log('First favorited card full output:', JSON.stringify(favoritedCards[0].output, null, 2));
-    }
 
     // Build findings sections from favorited outputs
     const findings = favoritedCards.map((card, index) => {
@@ -1138,6 +1131,16 @@ Please respond with a JSON object in this format:
         ? datasetRegistry.datasets[datasetRegistry.activeDataset].columnMetadata
         : columnMetadata;  // Fall back to legacy metadata
 
+      // Ensure columnMetadata is serializable (no DOM elements or circular refs)
+      // Create a clean copy with only the fields we need
+      const cleanColumnMetadata = activeDatasetMetadata ? activeDatasetMetadata.map(col => ({
+        name: col.name,
+        type: col.type,
+        ...(col.values && { values: Array.isArray(col.values) ? col.values : [] }),
+        ...(col.min !== undefined && { min: col.min }),
+        ...(col.max !== undefined && { max: col.max })
+      })) : null;
+
       // Send to Claude API with plot images and column metadata
       const response = await sendMessageToClaude(
         apiKey,
@@ -1145,7 +1148,7 @@ Please respond with a JSON object in this format:
         messages.map(m => ({ role: m.role, content: m.content })),
         suggestionsEnabled,
         recentPlots,  // Pass recent plots for Claude to see
-        activeDatasetMetadata  // Pass dataset schema so Claude knows column names
+        cleanColumnMetadata  // Pass dataset schema so Claude knows column names
       );
 
       // Create code cards for any R code blocks
@@ -1362,12 +1365,12 @@ Please respond with a JSON object in this format:
       : { mainContent: contentToDisplay, suggestions: [] };
 
     if (suggestions.length > 0) {
-      console.log('[renderMessage] Rendering', suggestions.length, 'suggestions. First suggestion type:', typeof suggestions[0], suggestions[0]);
+      console.log('[renderMessage] Rendering', suggestions.length, 'suggestions. First suggestion type:', typeof suggestions[0]);
     }
 
     // Debug logging for content type
     if (typeof mainContent !== 'string' && mainContent !== undefined) {
-      console.error('[renderMessage] WARNING: mainContent is not a string!', typeof mainContent, mainContent);
+      console.error('[renderMessage] WARNING: mainContent is not a string!', typeof mainContent);
     }
 
     // For assistant messages, use negative margin to pull closer to previous message

@@ -18,25 +18,44 @@ const PROXY_API_URL = 'http://localhost:3001/api/chat';
  */
 export async function sendMessageToClaude(apiKey, userMessage, conversationHistory = [], suggestionsEnabled = false, recentPlots = [], columnMetadata = null) {
   try {
+    // Create payload - ensure we only serialize plain data, not DOM elements or React refs
+    const payload = {
+      apiKey: apiKey,
+      suggestionsEnabled: suggestionsEnabled,
+      recentPlots: recentPlots,  // Include plot images for Claude's vision
+      columnMetadata: columnMetadata,  // Include dataset schema
+      messages: [
+        ...conversationHistory,
+        {
+          role: 'user',
+          content: userMessage
+        }
+      ]
+    };
+
+    // Safely serialize the payload, catching any circular reference errors
+    let bodyString;
+    try {
+      bodyString = JSON.stringify(payload);
+    } catch (stringifyError) {
+      console.error('Error serializing request payload:', stringifyError);
+      console.error('Payload structure:', {
+        hasApiKey: !!apiKey,
+        suggestionsEnabled,
+        recentPlotsCount: recentPlots?.length || 0,
+        columnMetadataCount: columnMetadata?.length || 0,
+        messagesCount: conversationHistory.length + 1
+      });
+      throw new Error('Failed to serialize API request: ' + stringifyError.message);
+    }
+
     // Call the proxy server instead of Anthropic API directly
     const response = await fetch(PROXY_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        apiKey: apiKey,
-        suggestionsEnabled: suggestionsEnabled,
-        recentPlots: recentPlots,  // Include plot images for Claude's vision
-        columnMetadata: columnMetadata,  // Include dataset schema
-        messages: [
-          ...conversationHistory,
-          {
-            role: 'user',
-            content: userMessage
-          }
-        ]
-      })
+      body: bodyString
     });
 
     // Get response text first
