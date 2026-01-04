@@ -1042,176 +1042,156 @@ WHEN NOT TO USE:
           // Skip if already has interactive element (categorical value)
           if (sug.interactive) continue;
 
-          // First, check for year ranges (dual-thumb slider)
-          // Patterns like "1950 to 1990", "1950-1990", "from 1950 to 1990", "between 1950 and 1990"
-          const yearRangePatterns = [
-            /\b(?:from\s+)?(\d{4})\s+(?:to|-|through)\s+(\d{4})\b/i,
-            /\bbetween\s+(\d{4})\s+and\s+(\d{4})\b/i,
-            /\b(\d{4})\s*-\s*(\d{4})\b/
+          // First, check for NUMERIC RANGES (dual-thumb slider)
+          // Patterns like "25 to 65", "1950-1990", "from 10 to 100", "between 0 and 50"
+          // Works with ANY numeric range, not just years
+          const numericRangePatterns = [
+            /\b(?:from\s+)?(\d+(?:\.\d+)?)\s+(?:to|through)\s+(\d+(?:\.\d+)?)\b/i,
+            /\bbetween\s+(\d+(?:\.\d+)?)\s+and\s+(\d+(?:\.\d+)?)\b/i,
+            /\b(\d{3,})\s*-\s*(\d{3,})\b/  // Hyphen for larger numbers (avoid matching "2-3" as range)
           ];
 
-          let yearRangeMatch = null;
-          let yearRangePattern = null;
+          let rangeMatch = null;
 
-          for (const pattern of yearRangePatterns) {
+          for (const pattern of numericRangePatterns) {
             const match = sug.text.match(pattern);
             if (match) {
-              const year1 = parseInt(match[1]);
-              const year2 = parseInt(match[2]);
+              rangeMatch = match;
+              break;
+            }
+          }
 
-              // Accept any 4-digit numbers as potential years
-              // The actual validation will come from dataset metadata
-              if (/^\d{4}$/.test(match[1]) && /^\d{4}$/.test(match[2])) {
-                yearRangeMatch = match;
-                yearRangePattern = pattern;
+          if (rangeMatch && columnMetadata && columnMetadata.length > 0) {
+            const value1 = parseFloat(rangeMatch[1]);
+            const value2 = parseFloat(rangeMatch[2]);
+            const rangeIndex = rangeMatch.index;
+            const rangeText = rangeMatch[0];
+
+            // Get context around the range to find column name
+            const contextStart = Math.max(0, rangeIndex - 50);
+            const contextEnd = Math.min(sug.text.length, rangeIndex + rangeText.length + 20);
+            const context = sug.text.substring(contextStart, contextEnd).toLowerCase();
+
+            // Try to find which numeric column this range belongs to
+            const numericColumns = columnMetadata.filter(col =>
+              col.type === 'numeric' && col.min !== undefined && col.max !== undefined
+            );
+
+            let matchedColumn = null;
+
+            // Strategy 1: Look for explicit column name mention
+            for (const col of numericColumns) {
+              if (context.includes(col.name.toLowerCase())) {
+                matchedColumn = col;
+                console.log(`[/api/chat] Matched range to column "${col.name}" via name mention`);
                 break;
               }
             }
-          }
 
-          if (yearRangeMatch) {
-            const startYear = parseInt(yearRangeMatch[1]);
-            const endYear = parseInt(yearRangeMatch[2]);
-            const rangeIndex = yearRangeMatch.index;
-            const rangeText = yearRangeMatch[0];
-
-            // Default: use the detected years with some padding (no hardcoded limits)
-            let sliderMin = Math.floor(Math.min(startYear, endYear) / 10) * 10 - 20;
-            let sliderMax = Math.ceil(Math.max(startYear, endYear) / 10) * 10 + 20;
-
-            // Look for a year column in columnMetadata to get actual bounds
-            if (columnMetadata && columnMetadata.length > 0) {
-              console.log(`[/api/chat] Looking for year column in columnMetadata with ${columnMetadata.length} columns`);
-              console.log(`[/api/chat] Available columns:`, columnMetadata.map(c => `${c.name}(${c.type}${c.min !== undefined ? `,${c.min}-${c.max}` : ''})`).join(', '));
-
-              const yearColumn = columnMetadata.find(col =>
-                col.type === 'numeric' && /^year$/i.test(col.name) && col.min !== undefined && col.max !== undefined
-              );
-
-              if (yearColumn) {
-                // Use the actual dataset min/max
-                sliderMin = Math.floor(yearColumn.min);
-                sliderMax = Math.ceil(yearColumn.max);
-                console.log(`[/api/chat] ✓ Found year column with range ${yearColumn.min}-${yearColumn.max}, using ${sliderMin}-${sliderMax}`);
-              } else {
-                console.log(`[/api/chat] ✗ No year column found in metadata, using calculated range ${sliderMin}-${sliderMax}`);
+            // Strategy 2: Check if range values fall within any column's bounds
+            if (!matchedColumn) {
+              for (const col of numericColumns) {
+                const minVal = Math.min(value1, value2);
+                const maxVal = Math.max(value1, value2);
+                if (minVal >= col.min && maxVal <= col.max) {
+                  matchedColumn = col;
+                  console.log(`[/api/chat] Matched range "${rangeText}" to column "${col.name}" via value range`);
+                  break;
+                }
               }
-            } else {
-              console.log(`[/api/chat] No columnMetadata available, using calculated range ${sliderMin}-${sliderMax}`);
             }
 
-            sug.interactive = {
-              type: 'year-range',
-              context: 'Year Range',
-              minValue: Math.min(startYear, endYear),
-              maxValue: Math.max(startYear, endYear),
-              min: sliderMin,
-              max: sliderMax,
-              step: 1,
-              start: rangeIndex,
-              end: rangeIndex + rangeText.length
-            };
-
-            console.log(`[/api/chat] Made suggestion year range slider with "${rangeText}" (${startYear}-${endYear}), bounds ${sliderMin}-${sliderMax}`);
-            continue; // Move to next suggestion
-          }
-
-          // Look for numeric values in common patterns
-          const numericPatterns = [
-            // "first/top/bottom N rows/countries/items" - capture the item name
-            { regex: /\b(?:first|top|bottom|last)\s+(\d+)\s+(rows?|countries?|items?|records?|entries?|values?|results?|cities?|states?|products?|customers?|users?)\b/i, extractName: true, min: 1, max: 100, step: 1 },
-            // "N bins/groups/clusters"
-            { regex: /\b(\d+)\s+(bins?|groups?|clusters?)\b/i, extractName: true, min: 5, max: 100, step: 5 },
-            // "sample N% / N percent"
-            { regex: /\bsample\s+(\d+)\s*%?\s*(?:percent)?\b/i, context: 'Sample percentage', min: 1, max: 100, step: 1 },
-            // "threshold of N" or "threshold = N"
-            { regex: /\bthreshold\s+(?:of\s+|=\s*)?(\d+(?:\.\d+)?)\b/i, context: 'Threshold value', min: 0, max: 1, step: 0.1 },
-            // Generic "N items" at the start of suggestion
-            { regex: /^(?:show|display|plot|create)\s+.*?\s+(\d+)\s+/i, context: 'Number of items', min: 1, max: 100, step: 1 }
-          ];
-
-          for (const pattern of numericPatterns) {
-            const match = sug.text.match(pattern.regex);
-            if (match) {
-              const numericValue = match[1];
-              const valueIndex = match.index + match[0].indexOf(numericValue);
-              const numValue = parseFloat(numericValue);
-
-              // Check if this is a year value (any 4-digit number)
-              const isYear = /^\d{4}$/.test(numericValue);
-
-              let context, min, max, step;
-
-              if (isYear) {
-                // For year values, use "Year" as context and determine bounds from dataset
-                context = 'Year';
-                // Default: use the detected year with some padding (no hardcoded limits)
-                min = Math.floor(numValue / 10) * 10 - 20;
-                max = Math.ceil(numValue / 10) * 10 + 20;
-                step = 1;
-
-                // Try to find the year column in columnMetadata to get actual bounds
-                if (columnMetadata && columnMetadata.length > 0) {
-                  console.log(`[/api/chat] Looking for year column for single year value "${numericValue}"`);
-                  console.log(`[/api/chat] Available columns:`, columnMetadata.map(c => `${c.name}(${c.type}${c.min !== undefined ? `,${c.min}-${c.max}` : ''})`).join(', '));
-
-                  // Look for year-like column names
-                  const yearColumn = columnMetadata.find(col =>
-                    col.type === 'numeric' && /^year$/i.test(col.name) && col.min !== undefined && col.max !== undefined
-                  );
-
-                  if (yearColumn) {
-                    // Use the actual dataset min/max
-                    min = Math.floor(yearColumn.min);
-                    max = Math.ceil(yearColumn.max);
-                    console.log(`[/api/chat] ✓ Found year column with range ${yearColumn.min}-${yearColumn.max}, using ${min}-${max}`);
-                  } else {
-                    console.log(`[/api/chat] ✗ No year column found, using calculated range ${min}-${max}`);
-                  }
-                } else {
-                  console.log(`[/api/chat] No columnMetadata, using calculated range ${min}-${max} for year value "${numericValue}"`);
-                }
-
-                console.log(`[/api/chat] Detected year value "${numericValue}", using range ${min}-${max}`);
-              } else if (pattern.extractName && match[2]) {
-                // Extract the item name from the pattern (e.g., "countries", "bins")
-                const itemName = match[2].toLowerCase();
-                // Singularize if plural (simple approach - remove trailing 's')
-                const singularName = itemName.endsWith('s') ? itemName.slice(0, -1) : itemName;
-                context = `Number of ${singularName}s`;
-                min = pattern.min;
-                max = pattern.max;
-                step = pattern.step;
-
-                // Adjust max if the current value suggests a larger range
-                if (numValue > max) {
-                  max = Math.ceil(numValue * 2);
-                }
-              } else {
-                // Use the pattern's default context
-                context = pattern.context;
-                min = pattern.min;
-                max = pattern.max;
-                step = pattern.step;
-
-                // Adjust max if the current value suggests a larger range
-                if (numValue > max) {
-                  max = Math.ceil(numValue * 2);
-                }
-              }
+            if (matchedColumn) {
+              const columnName = matchedColumn.name.charAt(0).toUpperCase() + matchedColumn.name.slice(1);
 
               sug.interactive = {
-                type: 'slider',
-                context: context,
-                min: min,
-                max: max,
-                step: step,
-                start: valueIndex,
-                end: valueIndex + numericValue.length
+                type: 'year-range',  // Keeping same type for dual-thumb slider
+                context: `${columnName} Range`,
+                minValue: Math.min(value1, value2),
+                maxValue: Math.max(value1, value2),
+                min: Math.floor(matchedColumn.min),
+                max: Math.ceil(matchedColumn.max),
+                step: Number.isInteger(matchedColumn.min) && Number.isInteger(matchedColumn.max) ? 1 : 0.1,
+                start: rangeIndex,
+                end: rangeIndex + rangeText.length
               };
 
-              console.log(`[/api/chat] Made suggestion numeric slider with value "${numericValue}" (${context})`);
-              break; // Only add one interactive element per suggestion
+              console.log(`[/api/chat] Made numeric range slider for "${rangeText}" on column "${matchedColumn.name}" (${matchedColumn.min}-${matchedColumn.max})`);
+              continue; // Move to next suggestion
+            }
+          }
+
+          // Look for SINGLE NUMERIC values that reference dataset columns
+          // Only make them interactive if we can confidently match to a column
+          if (columnMetadata && columnMetadata.length > 0) {
+            const numericColumns = columnMetadata.filter(col =>
+              col.type === 'numeric' && col.min !== undefined && col.max !== undefined
+            );
+
+            if (numericColumns.length > 0) {
+              // Look for single numeric values - try both integers and decimals
+              const numericPatterns = [
+                /\b(\d{3,}(?:\.\d+)?)\b/,  // 3+ digit numbers (years, IDs, prices)
+                /\b(\d{1,2}(?:\.\d+)?)\b/   // 1-2 digit numbers (ages, scores, small values)
+              ];
+
+              for (const pattern of numericPatterns) {
+                const numMatch = sug.text.match(pattern);
+                if (!numMatch) continue;
+
+                const numericValue = numMatch[1];
+                const numValue = parseFloat(numericValue);
+                const valueIndex = numMatch.index;
+
+                // Get context around the value to find column name
+                const contextStart = Math.max(0, valueIndex - 40);
+                const contextEnd = Math.min(sug.text.length, valueIndex + numericValue.length + 40);
+                const context = sug.text.substring(contextStart, contextEnd).toLowerCase();
+
+                let matchedColumn = null;
+
+                // Strategy 1: Look for explicit column name mention near the value
+                for (const col of numericColumns) {
+                  const colNameLower = col.name.toLowerCase();
+                  if (context.includes(colNameLower)) {
+                    // Value should be within column's range
+                    if (numValue >= col.min && numValue <= col.max) {
+                      matchedColumn = col;
+                      console.log(`[/api/chat] Matched value "${numericValue}" to column "${col.name}" via name mention`);
+                      break;
+                    }
+                  }
+                }
+
+                // Strategy 2: For 4-digit numbers, try year-like columns
+                if (!matchedColumn && /^\d{4}$/.test(numericValue)) {
+                  matchedColumn = numericColumns.find(col =>
+                    /year|yr|date|time/i.test(col.name) &&
+                    numValue >= col.min && numValue <= col.max
+                  );
+                  if (matchedColumn) {
+                    console.log(`[/api/chat] Matched 4-digit value "${numericValue}" to column "${matchedColumn.name}"`);
+                  }
+                }
+
+                // Create interactive element if we found a confident match
+                if (matchedColumn) {
+                  const columnName = matchedColumn.name.charAt(0).toUpperCase() + matchedColumn.name.slice(1);
+
+                  sug.interactive = {
+                    type: 'slider',
+                    context: columnName,
+                    min: Math.floor(matchedColumn.min),
+                    max: Math.ceil(matchedColumn.max),
+                    step: Number.isInteger(matchedColumn.min) && Number.isInteger(matchedColumn.max) ? 1 : 0.1,
+                    start: valueIndex,
+                    end: valueIndex + numericValue.length
+                  };
+
+                  console.log(`[/api/chat] Made numeric slider for "${numericValue}" (${matchedColumn.name}: ${matchedColumn.min}-${matchedColumn.max})`);
+                  break; // Only one interactive element per suggestion
+                }
+              }
             }
           }
         }
