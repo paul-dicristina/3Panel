@@ -1156,7 +1156,8 @@ Please respond with a JSON object in this format:
         messages.map(m => ({ role: m.role, content: m.content })),
         suggestionsEnabled,
         recentPlots,  // Pass recent plots for Claude to see
-        cleanColumnMetadata  // Pass dataset schema so Claude knows column names
+        cleanColumnMetadata,  // Pass dataset schema so Claude knows column names
+        datasetRegistry.activeDataset  // Pass active dataset name
       );
 
       // Create code cards for any R code blocks
@@ -1290,12 +1291,17 @@ Please respond with a JSON object in this format:
 
       // Update dataset registry if metadata was refreshed
       if (result.updatedMetadata) {
-        const { datasetName, columnMetadata, hash } = result.updatedMetadata;
+        const { datasetName, columnMetadata, hash, shouldBecomeActive } = result.updatedMetadata;
         console.log(`[EXECUTE] Updating registry for dataset '${datasetName}' with refreshed metadata`);
+
+        if (shouldBecomeActive) {
+          console.log(`[EXECUTE] Auto-switching active dataset to '${datasetName}' (tidy dataset)`);
+        }
 
         setDatasetRegistry(prev => ({
           ...prev,
-          activeDataset: datasetName,  // Keep or update active dataset
+          // Only update active dataset if shouldBecomeActive is true, otherwise keep current
+          activeDataset: shouldBecomeActive ? datasetName : prev.activeDataset,
           datasets: {
             ...prev.datasets,
             [datasetName]: {
@@ -1307,7 +1313,10 @@ Please respond with a JSON object in this format:
         }));
 
         // Also update legacy columnMetadata for backward compatibility
-        setColumnMetadata(columnMetadata);
+        // Only if this became the active dataset
+        if (shouldBecomeActive) {
+          setColumnMetadata(columnMetadata);
+        }
       }
 
       // Store output with the card using the provided cardId

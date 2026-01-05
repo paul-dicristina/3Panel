@@ -79,10 +79,11 @@ function checkQuartoAvailable() {
  */
 app.post('/api/chat', async (req, res) => {
   try {
-    const { apiKey, messages, suggestionsEnabled, recentPlots, columnMetadata } = req.body;
+    const { apiKey, messages, suggestionsEnabled, recentPlots, columnMetadata, activeDatasetName } = req.body;
 
     console.log('[/api/chat] Request received');
     console.log('[/api/chat] suggestionsEnabled:', suggestionsEnabled);
+    console.log('[/api/chat] activeDatasetName:', activeDatasetName || 'none');
     console.log('[/api/chat] columnMetadata present:', !!columnMetadata);
     if (columnMetadata && columnMetadata.length > 0) {
       console.log('[/api/chat] columnMetadata preview:', columnMetadata.slice(0, 5).map(c => `${c.name}(${c.type})`).join(', '), `... (${columnMetadata.length} total)`);
@@ -116,11 +117,14 @@ app.post('/api/chat', async (req, res) => {
         .filter(c => c.type === 'categorical' && c.values && c.values.length > 0)
         .map(c => `${c.name}: [${c.values.join(', ')}]`);
 
-      schemaInfo = `\n\nCURRENT DATASET SCHEMA:
+      const datasetNameInfo = activeDatasetName ? `\n🎯 ACTIVE DATASET: ${activeDatasetName}` : '';
+
+      schemaInfo = `\n\nCURRENT DATASET SCHEMA:${datasetNameInfo}
 Numeric columns: ${numericColumns.join(', ') || 'none'}
 Categorical columns with values:
 ${categoricalColumnsWithValues.map(c => `  - ${c}`).join('\n') || 'none'}
 
+⚠️  CRITICAL: When writing R code that references this dataset, you MUST use the name "${activeDatasetName || 'data'}".
 ⚠️  CRITICAL: When writing R code that references column names, you MUST use the EXACT column names shown above.
 DO NOT infer, guess, or fabricate column names. For example, if you see "TARGET: [Iris-setosa, ...]", the column name is TARGET, NOT "SPECIES" or any other name you might infer from the values.`;
     }
@@ -674,7 +678,33 @@ DO NOT use vague language:
 STEP 3 - IF DATA IS ALREADY TIDY:
 Do NOT include a tidy format suggestion. Proceed with other analysis suggestions only.
 
-===== END TIDY FORMAT REQUIREMENT =====`;
+===== END TIDY FORMAT REQUIREMENT =====
+
+===== CRITICAL NAMING CONVENTION FOR TIDY TRANSFORMATIONS =====
+
+When generating R code that converts data to tidy format (using pivot_longer, pivot_wider, gather, spread, etc.):
+
+REQUIRED BEHAVIOR:
+1. ALWAYS create a NEW dataset with "_tidy" appended to the original name
+2. DO NOT overwrite the original dataset
+
+CORRECT EXAMPLES:
+✓ lex_tidy <- lex %>% pivot_longer(...)
+✓ population_tidy <- population %>% pivot_longer(...)
+✓ sales_tidy <- sales %>% pivot_wider(...)
+
+WRONG EXAMPLES (DO NOT DO THIS):
+✗ lex <- lex %>% pivot_longer(...)  # Overwrites original
+✗ lex_long <- lex %>% pivot_longer(...)  # Use _tidy not _long
+✗ tidy_lex <- lex %>% pivot_longer(...)  # Suffix, not prefix
+
+This naming convention ensures:
+- Original data is preserved for reference
+- System can track the tidied dataset automatically
+- Future code generation uses the correct tidied dataset
+- Interactive suggestions use metadata from the tidied dataset
+
+===== END NAMING CONVENTION =====`;
     }
 
     // Add vision instructions if plots are included
@@ -963,24 +993,9 @@ WHEN NOT TO USE:
                     continue;
                   }
 
-                  // 4. Cardinality check: If column has very few values (≤3) and multiple are mentioned, it's comparative
-                  const totalValuesInColumn = col.values.length;
-                  if (totalValuesInColumn <= 3) {
-                    // Check if multiple values from this column appear in the suggestion
-                    let mentionedCount = 0;
-                    for (const otherValue of col.values) {
-                      const otherRegex = new RegExp(`\\b${otherValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-                      if (otherRegex.test(fullContext)) {
-                        mentionedCount++;
-                      }
-                    }
-
-                    // If 2+ values mentioned from a 3-value column, this is comparative (showing all)
-                    if (mentionedCount >= 2) {
-                      console.log(`[/api/chat] Skipping "${matchedValue}" - low cardinality column (${totalValuesInColumn} values) with ${mentionedCount} mentioned (comparative analysis)`);
-                      continue;
-                    }
-                  }
+                  // 4. REMOVED: Low cardinality filter was too aggressive
+                  // Lists like "USA, China, and India" SHOULD have interactive elements for each country
+                  // Users benefit from being able to swap out individual countries in comparative analyses
 
                   // 5. Check if multiple values from same column appear together in a list
                   // Allow individual interactive elements for each value in a comparative list
@@ -1617,8 +1632,8 @@ save.image("${workspacePath.replace(/\\/g, '/')}")
           try {
             console.log(`[METADATA REFRESH] Refreshing metadata for dataset: ${detectedDataset}`);
 
-            // Check if dataset exists
-            const checkCode = `exists("${detectedDataset}")`;
+              // Check if dataset exists
+              const checkCode = `exists("${detectedDataset}")`;
             const checkScriptPath = join(tempDir, `check_${timestamp}.R`);
             const checkWrapperCode = `
 # Set working directory to data folder
@@ -1787,15 +1802,23 @@ cat(toJSON(result, auto_unbox = TRUE))
                 }
 
                 // Add metadata to result
+                // Check if this is a tidy dataset that should become the new active dataset
+                const isTidyDataset = detectedDataset.endsWith('_tidy');
+
                 result.updatedMetadata = {
                   datasetName: detectedDataset,
                   columnMetadata: columnMetadata,
-                hash: JSON.stringify({
-                  ncol: metadataResult.ncol,
-                  nrow: metadataResult.nrow,
-                  columns: metadataResult.colnames
-                })
-              };
+                  shouldBecomeActive: isTidyDataset,  // Auto-switch to tidy datasets
+                  hash: JSON.stringify({
+                    ncol: metadataResult.ncol,
+                    nrow: metadataResult.nrow,
+                    columns: metadataResult.colnames
+                  })
+                };
+
+                if (isTidyDataset) {
+                  console.log(`[METADATA REFRESH] Detected tidy dataset '${detectedDataset}' - will become active dataset`);
+                }
 
                 console.log(`[METADATA REFRESH] Successfully refreshed metadata for '${detectedDataset}'`);
                 console.log(`[METADATA REFRESH] Columns: ${columnMetadata.length}, Categorical: ${columnMetadata.filter(c => c.type === 'categorical').length}, Numeric: ${columnMetadata.filter(c => c.type === 'numeric').length}`);

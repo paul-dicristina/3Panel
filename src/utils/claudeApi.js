@@ -14,9 +14,10 @@ const PROXY_API_URL = 'http://localhost:3001/api/chat';
  * @param {boolean} suggestionsEnabled - Whether suggestions are enabled
  * @param {Array} recentPlots - Recent plot images for Claude's vision
  * @param {Array} columnMetadata - Column schema information from current dataset
+ * @param {string} activeDatasetName - Name of the currently active dataset
  * @returns {Promise<Object>} Response containing text and any R code blocks
  */
-export async function sendMessageToClaude(apiKey, userMessage, conversationHistory = [], suggestionsEnabled = false, recentPlots = [], columnMetadata = null) {
+export async function sendMessageToClaude(apiKey, userMessage, conversationHistory = [], suggestionsEnabled = false, recentPlots = [], columnMetadata = null, activeDatasetName = null) {
   try {
     // Create payload - ensure we only serialize plain data, not DOM elements or React refs
     const payload = {
@@ -24,6 +25,7 @@ export async function sendMessageToClaude(apiKey, userMessage, conversationHisto
       suggestionsEnabled: suggestionsEnabled,
       recentPlots: recentPlots,  // Include plot images for Claude's vision
       columnMetadata: columnMetadata,  // Include dataset schema
+      activeDatasetName: activeDatasetName,  // Include active dataset name
       messages: [
         ...conversationHistory,
         {
