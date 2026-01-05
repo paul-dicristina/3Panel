@@ -680,7 +680,7 @@ cat(toJSON(all_items, auto_unbox = TRUE))
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black bg-opacity-20 flex items-center justify-center z-50">
       <style>{`
         @keyframes snowflake-pulse {
           0%, 100% {

@@ -177,14 +177,19 @@ const InteractiveSuggestion = ({ suggestion, iconName, onSubmit }) => {
     const newValue = parseInt(e.target.value);
     const { start, end } = interactivePositions;
 
+    // Minimum gap between sliders (1 year) to prevent them from overlapping completely
+    const minGap = 1;
+
     // Update the appropriate value
     let newMin = yearRangeValues.min;
     let newMax = yearRangeValues.max;
 
     if (thumb === 'min') {
-      newMin = Math.min(newValue, yearRangeValues.max); // Ensure min <= max
+      // Ensure min doesn't exceed (max - minGap)
+      newMin = Math.min(newValue, yearRangeValues.max - minGap);
     } else {
-      newMax = Math.max(newValue, yearRangeValues.min); // Ensure max >= min
+      // Ensure max doesn't go below (min + minGap)
+      newMax = Math.max(newValue, yearRangeValues.min + minGap);
     }
 
     setYearRangeValues({ min: newMin, max: newMax });

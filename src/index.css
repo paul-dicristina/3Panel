@@ -411,8 +411,10 @@ code {
 /* Style the max thumb slightly different so users can tell them apart */
 .dual-slider-container .range-max::-webkit-slider-thumb {
   background: #2a6a9a;
+  z-index: 2; /* Always show max thumb on top when overlapping */
 }
 
 .dual-slider-container .range-max::-moz-range-thumb {
   background: #2a6a9a;
+  z-index: 2; /* Always show max thumb on top when overlapping */
 }

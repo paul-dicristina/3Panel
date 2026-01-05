@@ -9,6 +9,7 @@ import CodeCard from './components/CodeCard';
 import DatasetReport from './components/DatasetReport';
 import SnowflakeBrowserModal from './components/SnowflakeBrowserModal';
 import InteractiveSuggestion from './components/InteractiveSuggestion';
+import ReactiveComponent from './components/ReactiveComponent';
 import { sendMessageToClaude } from './utils/claudeApi';
 import { executeRCode } from './utils/rExecutor';
 
@@ -919,6 +920,10 @@ Please respond with a JSON object in this format:
 
   // Handle suggestion click - populate input field but don't submit
   const handleSuggestionClick = (suggestion, event) => {
+    // SAFETY: Ensure suggestion is always a plain string, never an object or DOM element
+    // Interactive suggestions pass suggestion.text objects, while plain suggestions pass strings
+    const suggestionText = typeof suggestion === 'string' ? suggestion : String(suggestion?.text || suggestion || '');
+
     // Remove focus from the button to prevent blue outline
     if (event?.currentTarget) {
       event.currentTarget.blur();
@@ -926,10 +931,10 @@ Please respond with a JSON object in this format:
 
     if (event?.shiftKey) {
       // Shift-click: submit directly
-      handleSendMessage(suggestion);
+      handleSendMessage(suggestionText);
     } else {
       // Normal click: populate input
-      setInputValue(suggestion);
+      setInputValue(suggestionText);
       // Focus the textarea
       if (textareaRef.current) {
         textareaRef.current.focus();
@@ -1086,7 +1091,9 @@ Please respond with a JSON object in this format:
 
   // Handle sending a message to Claude
   const handleSendMessage = async (messageOverride = null) => {
-    const messageToSend = messageOverride || inputValue.trim();
+    // SAFETY: Ensure message is always a string, never an object or DOM element
+    const rawMessage = messageOverride || inputValue;
+    const messageToSend = (typeof rawMessage === 'string' ? rawMessage : String(rawMessage || '')).trim();
     if (!messageToSend || isLoading) return;
 
     // Clear any pending auto-submit timer
@@ -1112,14 +1119,15 @@ Please respond with a JSON object in this format:
 
     try {
       // Collect recent plot images from code cards (last 3 plots for context)
+      // SAFETY: Create clean objects to avoid circular references or DOM elements
       const recentPlots = [];
       for (const card of codeCards.slice(-3)) {
         if (card.output && card.output.plots) {
           for (const plot of card.output.plots) {
             if (plot.pngBase64) {
               recentPlots.push({
-                base64Data: plot.pngBase64,
-                summary: card.summary
+                base64Data: String(plot.pngBase64),
+                summary: String(card.summary || '')
               });
             }
           }
@@ -1166,6 +1174,12 @@ Please respond with a JSON object in this format:
       // Matches both ```r and ```R with optional whitespace and content
       let displayText = response.text.replace(/```[rR]\s*[\s\S]*?```/g, '').trim();
 
+      // Strip reactive component JSON blocks from displayed text
+      // These will be rendered as interactive components instead
+      if (response.reactiveComponents && response.reactiveComponents.length > 0) {
+        displayText = displayText.replace(/```json\s*[\s\S]*?```/g, '').trim();
+      }
+
       // If we have structured suggestions, also strip the textual suggestions section
       if (response.suggestions && response.suggestions.length > 0) {
         // Strip "Suggestions for further analysis:" section and everything after it
@@ -1175,8 +1189,9 @@ Please respond with a JSON object in this format:
       // Debug: Log if suggestions are enabled and what the message contains
       console.log('Suggestions enabled:', suggestionsEnabled);
       console.log('Message text after stripping code:', displayText);
+      console.log('Reactive components found:', response.reactiveComponents?.length || 0);
 
-      // Add assistant response to chat with embedded code cards
+      // Add assistant response to chat with embedded code cards and reactive components
       // Store both original text (for API) and display text (for rendering)
       const assistantMessage = {
         id: Date.now() + 1,
@@ -1184,10 +1199,12 @@ Please respond with a JSON object in this format:
         content: response.text,  // Keep original for API
         displayContent: displayText,  // Stripped version for display
         codeCards: newCards,  // Attach code cards to this message
-        suggestions: response.suggestions || undefined  // Add suggestions if available
+        suggestions: response.suggestions || undefined,  // Add suggestions if available
+        reactiveComponents: response.reactiveComponents || undefined  // Add reactive components if available
       };
 
       console.log('[handleSendMessage] Assistant message with suggestions:', assistantMessage.suggestions);
+      console.log('[handleSendMessage] Assistant message with reactive components:', assistantMessage.reactiveComponents);
       setMessages(prev => [...prev, assistantMessage]);
 
       // Add cards to global cards array
@@ -1428,6 +1445,21 @@ Please respond with a JSON object in this format:
                 code={card.code}
                 isSelected={card.id === selectedCardId}
                 onClick={handleCardSelect}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Reactive components (if any) */}
+        {message.reactiveComponents && message.reactiveComponents.length > 0 && (
+          <div className="space-y-4 max-w-[80%] mt-3">
+            {message.reactiveComponents.map((spec, index) => (
+              <ReactiveComponent
+                key={index}
+                spec={spec}
+                onError={(error) => {
+                  console.error('Reactive component error:', error);
+                }}
               />
             ))}
           </div>
