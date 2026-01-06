@@ -1,0 +1,20 @@
+---
+title: "DEMOS Dataset Analysis"
+date: "1/6/2026"
+format:
+  html:
+    theme: default
+    toc: false
+    embed-resources: true
+---
+
+This report presents 2 key findings from an analysis of the dataset. The analysis addressed 7 questions focused on exploring patterns, relationships, and insights within the data.
+
+![](plot_1767719043329_0_0.svg)
+
+This line chart compares life expectancy trends across the USA, UK, Germany, and Brazil from 1800 to 2100. The visualization reveals how these four nations have experienced dramatically different trajectories in longevity, with developed nations generally showing earlier and steeper improvements compared to Brazil's later but rapid gains.
+
+![](plot_1767719043329_1_0.svg)
+
+This focused view of Brazil's life expectancy from 1990 to 2020 highlights a significant milestone: crossing the 70-year threshold around the year 2000. The steady upward trend shows Brazil's consistent public health improvements over three decades, with life expectancy rising from approximately 66 years in 1990 to nearly 76 years by 2020.
+
