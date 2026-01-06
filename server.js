@@ -1065,10 +1065,62 @@ WHEN NOT TO USE:
         // Add numeric sliders for suggestions that don't already have interactive elements
         console.log('[/api/chat] Checking for numeric values to make interactive...');
         for (const sug of parsedSuggestions) {
-          // Skip if already has interactive element (categorical value)
-          if (sug.interactive) continue;
+          // Check if Claude provided explicit numeric range with column specification
+          if (sug.interactive && sug.interactive.type === 'numeric-range') {
+            // Claude explicitly specified the column - use it!
+            const { column, minValue, maxValue } = sug.interactive;
 
-          // First, check for NUMERIC RANGES (dual-thumb slider)
+            // Validate column exists in metadata
+            const matchedColumn = columnMetadata.find(col =>
+              col.type === 'numeric' && col.name === column
+            );
+
+            if (matchedColumn) {
+              // Find the range text in the suggestion to calculate positions
+              const rangePatterns = [
+                new RegExp(`\\b(?:from\\s+)?${minValue}\\s+(?:to|through)\\s+${maxValue}\\b`, 'i'),
+                new RegExp(`\\bbetween\\s+${minValue}\\s+and\\s+${maxValue}\\b`, 'i'),
+                new RegExp(`\\b${minValue}\\s*-\\s*${maxValue}\\b`)
+              ];
+
+              let rangeMatch = null;
+              for (const pattern of rangePatterns) {
+                const match = sug.text.match(pattern);
+                if (match) {
+                  rangeMatch = match;
+                  break;
+                }
+              }
+
+              if (rangeMatch) {
+                const columnName = matchedColumn.name.charAt(0).toUpperCase() + matchedColumn.name.slice(1);
+
+                sug.interactive = {
+                  type: 'year-range',  // Use year-range type for dual-thumb slider
+                  context: `${columnName} Range`,
+                  minValue: minValue,
+                  maxValue: maxValue,
+                  min: Math.floor(matchedColumn.min),
+                  max: Math.ceil(matchedColumn.max),
+                  step: Number.isInteger(matchedColumn.min) && Number.isInteger(matchedColumn.max) ? 1 : 0.1,
+                  start: rangeMatch.index,
+                  end: rangeMatch.index + rangeMatch[0].length
+                };
+
+                console.log(`[/api/chat] ✓ Made numeric range slider from Claude's specification: column="${column}", range=${minValue}-${maxValue}`);
+                continue; // Move to next suggestion
+              } else {
+                console.log(`[/api/chat] ✗ Claude specified numeric range but couldn't find range text in suggestion`);
+              }
+            } else {
+              console.log(`[/api/chat] ✗ Claude specified column "${column}" but it doesn't exist in metadata or isn't numeric`);
+            }
+          }
+
+          // Skip if already has interactive element (categorical value)
+          if (sug.interactive && !sug.interactive.type) continue;
+
+          // FALLBACK: Try to guess numeric range from text (old behavior)
           // Patterns like "25 to 65", "1950-1990", "from 10 to 100", "between 0 and 50"
           // Works with ANY numeric range, not just years
           const numericRangePatterns = [
@@ -2299,16 +2351,17 @@ ${suggestionsEnabled ? `
 - For suggestions: provide 2-4 specific, actionable prompts for CHART/PLOT analysis only
 - ⚠️ CRITICAL: If data is NOT in tidy format, the FIRST suggestion MUST be a specific prompt to convert it to tidy format using pivot_longer(). This will be ENFORCED by server validation - if data is not tidy and first suggestion is not about conversion, ALL suggestions will be removed.
 - Each suggestion MUST be fully executable with specific column names
-- For plot suggestions, you MAY mark ONE categorical VALUE as interactive:
-  * Include a specific categorical value in your suggestion (e.g., "for Iris-setosa" or "in Canada")
-  * ONLY make actual categorical VALUES interactive (like "Iris-setosa"), NEVER column names, NEVER other words
-  * Provide the interactive object with ONLY three fields:
-    - "value": the exact categorical value text (e.g., "Iris-setosa")
-    - "context": brief label (e.g., "species", "country", "year")
-    - "options": array of alternative values from the schema above
-  * DO NOT calculate character positions - the server does this automatically
+- For plot suggestions, you MAY mark ONE element as interactive (categorical value OR numeric range):
 
-  CORRECT EXAMPLE:
+  OPTION 1 - CATEGORICAL VALUE:
+  * Include a specific categorical value in your suggestion (e.g., "for Iris-setosa" or "in Canada")
+  * ONLY make actual categorical VALUES interactive (like "Iris-setosa"), NEVER column names
+  * Provide interactive object with three fields:
+    - "value": the exact categorical value text (e.g., "Iris-setosa")
+    - "context": brief label (e.g., "species", "country")
+    - "options": array of alternative values from the schema above
+
+  CATEGORICAL EXAMPLE:
   {
     "text": "Create a box plot of SEPAL_LENGTH_CM for Iris-setosa",
     "interactive": {
@@ -2318,9 +2371,30 @@ ${suggestionsEnabled ? `
     }
   }
 
+  OPTION 2 - NUMERIC RANGE:
+  * Include a numeric range in your suggestion (e.g., "from 1990 to 2020" or "between 25 and 65")
+  * ⚠️ CRITICAL: You MUST explicitly specify which COLUMN the range refers to
+  * Provide interactive object with these fields:
+    - "type": "numeric-range"
+    - "column": the EXACT column name from the schema (e.g., "year", "age", "temperature")
+    - "minValue": the minimum value in your suggestion (e.g., 1990)
+    - "maxValue": the maximum value in your suggestion (e.g., 2020)
+
+  NUMERIC RANGE EXAMPLE:
+  {
+    "text": "Create a line plot showing life expectancy trends from 1990 to 2020",
+    "interactive": {
+      "type": "numeric-range",
+      "column": "year",
+      "minValue": 1990,
+      "maxValue": 2020
+    }
+  }
+
   WRONG EXAMPLES:
   ✗ "value": "species" - this is a column name, not a categorical value!
-  ✗ "value": "distributions" - this is not a categorical value!
+  ✗ "type": "numeric-range" without "column" - you MUST specify the column!
+  ✗ "column": "life expectancy" when schema shows "life_expectancy" - use EXACT name!
 
 - Most suggestions (2-3 out of 4) should NOT have interactive elements` : ''}
 
@@ -2895,16 +2969,17 @@ ${suggestionsEnabled ? `
 - For suggestions: provide 2-4 specific, actionable prompts for CHART/PLOT analysis only
 - ⚠️ CRITICAL: If data is NOT in tidy format, the FIRST suggestion MUST be a specific prompt to convert it to tidy format using pivot_longer(). This will be ENFORCED by server validation - if data is not tidy and first suggestion is not about conversion, ALL suggestions will be removed.
 - Each suggestion MUST be fully executable with specific column names
-- For plot suggestions, you MAY mark ONE categorical VALUE as interactive:
-  * Include a specific categorical value in your suggestion (e.g., "for Iris-setosa" or "in Canada")
-  * ONLY make actual categorical VALUES interactive (like "Iris-setosa"), NEVER column names, NEVER other words
-  * Provide the interactive object with ONLY three fields:
-    - "value": the exact categorical value text (e.g., "Iris-setosa")
-    - "context": brief label (e.g., "species", "country", "year")
-    - "options": array of alternative values from the schema above
-  * DO NOT calculate character positions - the server does this automatically
+- For plot suggestions, you MAY mark ONE element as interactive (categorical value OR numeric range):
 
-  CORRECT EXAMPLE:
+  OPTION 1 - CATEGORICAL VALUE:
+  * Include a specific categorical value in your suggestion (e.g., "for Iris-setosa" or "in Canada")
+  * ONLY make actual categorical VALUES interactive (like "Iris-setosa"), NEVER column names
+  * Provide interactive object with three fields:
+    - "value": the exact categorical value text (e.g., "Iris-setosa")
+    - "context": brief label (e.g., "species", "country")
+    - "options": array of alternative values from the schema above
+
+  CATEGORICAL EXAMPLE:
   {
     "text": "Create a box plot of SEPAL_LENGTH_CM for Iris-setosa",
     "interactive": {
@@ -2914,9 +2989,30 @@ ${suggestionsEnabled ? `
     }
   }
 
+  OPTION 2 - NUMERIC RANGE:
+  * Include a numeric range in your suggestion (e.g., "from 1990 to 2020" or "between 25 and 65")
+  * ⚠️ CRITICAL: You MUST explicitly specify which COLUMN the range refers to
+  * Provide interactive object with these fields:
+    - "type": "numeric-range"
+    - "column": the EXACT column name from the schema (e.g., "year", "age", "temperature")
+    - "minValue": the minimum value in your suggestion (e.g., 1990)
+    - "maxValue": the maximum value in your suggestion (e.g., 2020)
+
+  NUMERIC RANGE EXAMPLE:
+  {
+    "text": "Create a line plot showing life expectancy trends from 1990 to 2020",
+    "interactive": {
+      "type": "numeric-range",
+      "column": "year",
+      "minValue": 1990,
+      "maxValue": 2020
+    }
+  }
+
   WRONG EXAMPLES:
   ✗ "value": "species" - this is a column name, not a categorical value!
-  ✗ "value": "distributions" - this is not a categorical value!
+  ✗ "type": "numeric-range" without "column" - you MUST specify the column!
+  ✗ "column": "life expectancy" when schema shows "life_expectancy" - use EXACT name!
 
 - Most suggestions (2-3 out of 4) should NOT have interactive elements` : ''}
 
