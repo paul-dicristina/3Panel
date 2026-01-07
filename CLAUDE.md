@@ -58,26 +58,61 @@ Interactive suggestions are generated server-side in `server.js` using dataset m
 - ❌ "Plot across all countries" → No value becomes interactive (aggregation)
 - ❌ "Countries (Japan, China, India)" → No values (parenthetical list)
 
-### 2. Numeric Ranges (`server.js:1045-1122`)
+### 2. Numeric Ranges (`server.js:1068-1118`)
 
-**Criteria for making a range interactive:**
+**NEW APPROACH (2026-01-07): Claude Explicitly Specifies Column**
 
-```javascript
-// Must match one of these patterns:
-- "from X to Y"
-- "X to Y"
-- "between X and Y"
-- "X-Y" (for numbers ≥100)
+Instead of the backend guessing which column a numeric range refers to, **Claude now explicitly declares it** when generating suggestions.
 
-// AND must match a numeric column by:
-Strategy 1: Column name mentioned nearby ("year from 1950 to 2020")
-Strategy 2: Range values fall within column's min/max bounds
+**How It Works:**
+
+1. **Claude generates suggestion** with numeric range JSON:
+```json
+{
+  "text": "Create a line plot showing trends from 1990 to 2020",
+  "interactive": {
+    "type": "numeric-range",
+    "column": "year",           // ← Claude specifies the column!
+    "minValue": 1990,
+    "maxValue": 2020
+  }
+}
 ```
 
+2. **Backend validates and processes:**
+   - Checks if column exists in metadata
+   - Validates column is numeric type
+   - Finds range text in suggestion for positioning
+   - Creates dual-thumb slider with correct bounds
+
+3. **Result:** Reliable, accurate range sliders
+
+**System Prompt Instructions ([server.js:2324-2340](server.js#L2324-L2340)):**
+```
+OPTION 2 - NUMERIC RANGE:
+* Include a numeric range in your suggestion (e.g., "from 1990 to 2020")
+* ⚠️ CRITICAL: You MUST explicitly specify which COLUMN the range refers to
+* Provide interactive object with these fields:
+  - "type": "numeric-range"
+  - "column": the EXACT column name from the schema
+  - "minValue": the minimum value in your suggestion
+  - "maxValue": the maximum value in your suggestion
+```
+
+**Advantages over old text-parsing approach:**
+- ✅ No ambiguity when multiple columns could match
+- ✅ Claude knows context (e.g., "1990 to 2020" refers to `year`, not `life_expectancy`)
+- ✅ Works with any column name (not just "year")
+- ✅ Reliable across all datasets
+
+**Fallback behavior:**
+- If Claude doesn't specify `column`, backend falls back to old text-parsing logic
+- Ensures backwards compatibility
+
 **Example matches:**
-- ✅ "Plot from **1950 to 2020**" (if "year" column exists with min=1800, max=2100)
-- ✅ "Ages **25 to 65**" (if "age" column exists with min=0, max=100)
-- ❌ "From 1950 to 2020" (if dataset has no year column or wrong range)
+- ✅ "Plot from **1990 to 2020**" with `column: "year"` → Year slider (1800-2100)
+- ✅ "Ages **25 to 65**" with `column: "age"` → Age slider (0-100)
+- ✅ "Life expectancy between **50 and 80**" with `column: "life_expectancy"` → LE slider (1-95)
 
 ### 3. Single Numeric Values (`server.js:1124-1196`)
 
