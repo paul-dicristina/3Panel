@@ -4,7 +4,7 @@
  * Handles all interactions with the Anthropic Claude API via proxy server
  */
 
-const PROXY_API_URL = 'http://localhost:3001/api/chat';
+const PROXY_API_URL = '/api/chat';
 
 /**
  * Send a message to Claude and get a response

@@ -315,7 +315,7 @@ function App() {
     if (viewMode === 'data') {
       const fetchDataFrames = async () => {
         try {
-          const response = await fetch('http://localhost:3001/api/list-dataframes');
+          const response = await fetch('/api/list-dataframes');
           if (response.ok) {
             const data = await response.json();
             setDataFrames(data.dataframes || []);
@@ -444,7 +444,7 @@ Please respond with a JSON object in this format:
 
       console.log('Step 4: Sending to backend...');
       // Send to backend to render
-      const response = await fetch('http://localhost:3001/api/create-quarto-report', {
+      const response = await fetch('/api/create-quarto-report', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -600,7 +600,7 @@ Please respond with a JSON object in this format:
         let filename = file.name;
 
         // Check if file already exists in data folder
-        const checkResponse = await fetch(`http://localhost:3001/api/check-file/${encodeURIComponent(filename)}`);
+        const checkResponse = await fetch(`/api/check-file/${encodeURIComponent(filename)}`);
         const checkResult = await checkResponse.json();
 
         if (!checkResult.exists) {
@@ -608,7 +608,7 @@ Please respond with a JSON object in this format:
           const formData = new FormData();
           formData.append('file', file);
 
-          const uploadResponse = await fetch('http://localhost:3001/api/upload-data', {
+          const uploadResponse = await fetch('/api/upload-data', {
             method: 'POST',
             body: formData
           });
@@ -642,7 +642,7 @@ Please respond with a JSON object in this format:
 
         try {
           // Call the new two-phase load-and-report endpoint
-          const response = await fetch('http://localhost:3001/api/load-and-report-data', {
+          const response = await fetch('/api/load-and-report-data', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -783,7 +783,7 @@ Please respond with a JSON object in this format:
 
       try {
         // Call the new load-and-report-snowflake endpoint
-        const response = await fetch('http://localhost:3001/api/load-and-report-snowflake', {
+        const response = await fetch('/api/load-and-report-snowflake', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -901,7 +901,7 @@ Please respond with a JSON object in this format:
 
     // Clear R workspace
     try {
-      await fetch('http://localhost:3001/api/clear-workspace', {
+      await fetch('/api/clear-workspace', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

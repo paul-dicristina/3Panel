@@ -917,6 +917,11 @@ WHEN NOT TO USE:
         // Convert to suggestion objects
         parsedSuggestions = suggestionLines.map(text => ({ text }));
 
+        // Initialize interactives array for each suggestion
+        for (const sug of parsedSuggestions) {
+          sug.interactives = [];
+        }
+
         console.log('[/api/chat] Extracted', parsedSuggestions.length, 'suggestions from response');
 
         // Add interactive elements if we have column metadata
@@ -1049,15 +1054,18 @@ WHEN NOT TO USE:
 
             // Apply the best match if found
             if (bestMatch) {
-              sug.interactive = {
+              sug.interactives.push({
                 value: bestMatch.value,
                 context: `Select ${bestMatch.column.name}`,
                 options: [...bestMatch.column.values].sort(),
                 start: bestMatch.index,
                 end: bestMatch.index + bestMatch.value.length
-              };
+              });
 
               console.log(`[/api/chat] Made suggestion interactive with value "${bestMatch.value}" from column ${bestMatch.column.name}`);
+
+              // Only keep first 2 interactive elements
+              if (sug.interactives.length >= 2) break;
             }
           }
         }
@@ -1117,8 +1125,8 @@ WHEN NOT TO USE:
             }
           }
 
-          // Skip if already has interactive element (categorical value)
-          if (sug.interactive && !sug.interactive.type) continue;
+          // Skip if already has 2 interactive elements
+          if (sug.interactives.length >= 2) continue;
 
           // FALLBACK: Try to guess numeric range from text (old behavior)
           // Patterns like "25 to 65", "1950-1990", "from 10 to 100", "between 0 and 50"
@@ -1182,7 +1190,7 @@ WHEN NOT TO USE:
             if (matchedColumn) {
               const columnName = matchedColumn.name.charAt(0).toUpperCase() + matchedColumn.name.slice(1);
 
-              sug.interactive = {
+              sug.interactives.push({
                 type: 'year-range',  // Keeping same type for dual-thumb slider
                 context: `${columnName} Range`,
                 minValue: Math.min(value1, value2),
@@ -1192,7 +1200,7 @@ WHEN NOT TO USE:
                 step: Number.isInteger(matchedColumn.min) && Number.isInteger(matchedColumn.max) ? 1 : 0.1,
                 start: rangeIndex,
                 end: rangeIndex + rangeText.length
-              };
+              });
 
               console.log(`[/api/chat] Made numeric range slider for "${rangeText}" on column "${matchedColumn.name}" (${matchedColumn.min}-${matchedColumn.max})`);
               continue; // Move to next suggestion
@@ -1256,7 +1264,7 @@ WHEN NOT TO USE:
                 if (matchedColumn) {
                   const columnName = matchedColumn.name.charAt(0).toUpperCase() + matchedColumn.name.slice(1);
 
-                  sug.interactive = {
+                  sug.interactives.push({
                     type: 'slider',
                     context: columnName,
                     min: Math.floor(matchedColumn.min),
@@ -1264,10 +1272,10 @@ WHEN NOT TO USE:
                     step: Number.isInteger(matchedColumn.min) && Number.isInteger(matchedColumn.max) ? 1 : 0.1,
                     start: valueIndex,
                     end: valueIndex + numericValue.length
-                  };
+                  });
 
                   console.log(`[/api/chat] Made numeric slider for "${numericValue}" (${matchedColumn.name}: ${matchedColumn.min}-${matchedColumn.max})`);
-                  break; // Only one interactive element per suggestion
+                  // Removed break - allow up to 2 interactive elements
                 }
               }
             }
@@ -1278,6 +1286,22 @@ WHEN NOT TO USE:
       }
     } else {
       console.log('[/api/chat] Skipping suggestion extraction (suggestionsEnabled:', suggestionsEnabled, ')');
+    }
+
+    // Add backwards compatibility - maintain old .interactive field for single elements
+    if (parsedSuggestions && parsedSuggestions.length > 0) {
+      for (const sug of parsedSuggestions) {
+        // Limit to 2 elements max (safety check)
+        if (sug.interactives && sug.interactives.length > 2) {
+          sug.interactives = sug.interactives.slice(0, 2);
+        }
+
+        // Keep old format for single element (backwards compatibility)
+        if (sug.interactives && sug.interactives.length === 1) {
+          sug.interactive = sug.interactives[0];
+        }
+        // For 2 elements, only use new format (no .interactive field)
+      }
     }
 
     // Return the response with parsed suggestions
@@ -2351,7 +2375,7 @@ ${suggestionsEnabled ? `
 - For suggestions: provide 2-4 specific, actionable prompts for CHART/PLOT analysis only
 - ⚠️ CRITICAL: If data is NOT in tidy format, the FIRST suggestion MUST be a specific prompt to convert it to tidy format using pivot_longer(). This will be ENFORCED by server validation - if data is not tidy and first suggestion is not about conversion, ALL suggestions will be removed.
 - Each suggestion MUST be fully executable with specific column names
-- For plot suggestions, you MAY mark ONE element as interactive (categorical value OR numeric range):
+- For plot suggestions, you MAY mark UP TO TWO elements as interactive (one categorical value + one numeric range):
 
   OPTION 1 - CATEGORICAL VALUE:
   * Include a specific categorical value in your suggestion (e.g., "for Iris-setosa" or "in Canada")
@@ -2969,7 +2993,7 @@ ${suggestionsEnabled ? `
 - For suggestions: provide 2-4 specific, actionable prompts for CHART/PLOT analysis only
 - ⚠️ CRITICAL: If data is NOT in tidy format, the FIRST suggestion MUST be a specific prompt to convert it to tidy format using pivot_longer(). This will be ENFORCED by server validation - if data is not tidy and first suggestion is not about conversion, ALL suggestions will be removed.
 - Each suggestion MUST be fully executable with specific column names
-- For plot suggestions, you MAY mark ONE element as interactive (categorical value OR numeric range):
+- For plot suggestions, you MAY mark UP TO TWO elements as interactive (one categorical value + one numeric range):
 
   OPTION 1 - CATEGORICAL VALUE:
   * Include a specific categorical value in your suggestion (e.g., "for Iris-setosa" or "in Canada")

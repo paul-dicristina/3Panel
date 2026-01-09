@@ -46,7 +46,7 @@ const SnowflakeBrowserModal = ({ isOpen, onClose, onLoad }) => {
     setError(null);
 
     try {
-      const response = await fetch('http://localhost:3001/api/execute-r', {
+      const response = await fetch('/api/execute-r', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -106,7 +106,7 @@ cat(toJSON(databases, auto_unbox = TRUE))
   const loadSchemas = async (database) => {
     console.log(`Loading schemas for ${database}`);
     try {
-      const response = await fetch('http://localhost:3001/api/execute-r', {
+      const response = await fetch('/api/execute-r', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -171,7 +171,7 @@ tryCatch({
   const loadTables = async (database, schema) => {
     console.log(`Loading tables for ${database}.${schema}`);
     try {
-      const response = await fetch('http://localhost:3001/api/execute-r', {
+      const response = await fetch('/api/execute-r', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

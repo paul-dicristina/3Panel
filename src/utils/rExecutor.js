@@ -5,7 +5,7 @@
  * The backend runs R code using the system's R installation
  */
 
-const R_API_URL = 'http://localhost:3001/api/execute-r';
+const R_API_URL = '/api/execute-r';
 
 /**
  * Execute R code via backend and return the output
