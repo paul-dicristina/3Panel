@@ -1957,7 +1957,7 @@ Please respond with a JSON object in this format:
               </button>
               <button
                 ref={submitButtonRef}
-                onClick={handleSendMessage}
+                onClick={() => handleSendMessage()}
                 disabled={isLoading || !inputValue.trim()}
                 className={`absolute right-1 top-1 w-8 h-8 rounded-md text-white bg-[#3a7aaf] hover:bg-[#2d6290] disabled:bg-[#c0c0c0] disabled:cursor-not-allowed transition-colors flex items-center justify-center overflow-hidden ${isSubmitAnimating ? 'submit-button-animating' : ''}`}
                 style={isSubmitAnimating ? { backgroundColor: '#3a7aaf' } : {}}
