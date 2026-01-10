@@ -17,4 +17,3 @@ The life expectancy dataset has been transformed from wide format to long format
 ![](plot_1765483569850_1_0.svg)
 
 This visualization tracks life expectancy trends for the five countries that achieved the greatest improvements between 1910 and 2025. South Korea leads with a remarkable 60.7-year gain (from 22.9 to 83.6 years), followed by North Korea, Bangladesh, Iran, and Kuwait, all showing dramatic upward trajectories particularly accelerating after mid-century, reflecting major advances in healthcare, nutrition, and living standards across these diverse nations.
-

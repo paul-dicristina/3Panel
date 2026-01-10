@@ -9,7 +9,19 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 const InteractiveSuggestion = ({ suggestion, iconName, onSubmit }) => {
   // Track current text (may differ from original if user swaps values)
   // IMPORTANT: Ensure this is always a string
-  const initialText = typeof suggestion === 'string' ? suggestion : (suggestion.text || '');
+  // Handle both string suggestions and object suggestions with .text property
+  const initialText = typeof suggestion === 'string'
+    ? suggestion
+    : (typeof suggestion === 'object' && suggestion !== null && typeof suggestion.text === 'string')
+      ? suggestion.text
+      : '[Invalid suggestion format]';
+
+  console.log('[InteractiveSuggestion] INIT - suggestion:', typeof suggestion, 'initialText:', initialText);
+
+  if (initialText === '[Invalid suggestion format]') {
+    console.error('[InteractiveSuggestion] ERROR: Invalid suggestion format!', suggestion);
+  }
+
   const [currentText, setCurrentText] = useState(String(initialText));
 
   // Track which element's popup is showing (null | 0 | 1)
@@ -437,6 +449,7 @@ const InteractiveSuggestion = ({ suggestion, iconName, onSubmit }) => {
 
   // Render text with multiple interactive elements
   const renderText = () => {
+    console.log('[renderText] currentText:', currentText, 'type:', typeof currentText);
     if (interactives.length === 0) {
       return <span className="break-words">{currentText}</span>;
     }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Split from 'split.js';
 import { Light as SyntaxHighlighter } from 'react-syntax-highlighter';
 import r from 'react-syntax-highlighter/dist/esm/languages/hljs/r';
@@ -49,6 +49,14 @@ function App() {
   const [autoFormatTabular, setAutoFormatTabular] = useState(true);
   const [columnMetadata, setColumnMetadata] = useState(null); // Dataset schema for Claude (DEPRECATED: use datasetRegistry)
   const [showConversationsMenu, setShowConversationsMenu] = useState(false);
+
+  // Conversation persistence state
+  const [currentConversationId, setCurrentConversationId] = useState(null);
+  const [conversations, setConversations] = useState([]);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
+  const [showLimitConfirm, setShowLimitConfirm] = useState(false);
+  const [editingConversationId, setEditingConversationId] = useState(null);
+  const [editingTitle, setEditingTitle] = useState('');
 
   // Dataset registry - tracks all datasets in R environment with their metadata
   const [datasetRegistry, setDatasetRegistry] = useState({
@@ -119,8 +127,145 @@ function App() {
     return 'sparkle';
   };
 
-  // Load API key from localStorage on mount
+  // LocalStorage helper functions for conversation persistence
+  const CONVERSATIONS_LIST_KEY = '3panel_conversations_list';
+  const CONVERSATION_PREFIX = '3panel_conversation_';
+  const MAX_CONVERSATIONS = 25;
+
+  // Generate unique title from first user message
+  const generateUniqueTitle = (firstMessage, existingTitles) => {
+    let baseTitle = firstMessage.substring(0, 50);
+    if (firstMessage.length > 50) {
+      baseTitle += '...';
+    }
+
+    // Make title unique by appending number if needed
+    let title = baseTitle;
+    let counter = 1;
+    while (existingTitles.includes(title)) {
+      title = `${baseTitle} (${counter})`;
+      counter++;
+    }
+
+    return title;
+  };
+
+  // Load conversations list from localStorage
+  const loadConversationsList = () => {
+    try {
+      const stored = localStorage.getItem(CONVERSATIONS_LIST_KEY);
+      const parsed = stored ? JSON.parse(stored) : [];
+      console.log('[localStorage] Loaded conversations list:', parsed.length, 'items');
+      return parsed;
+    } catch (error) {
+      console.error('[localStorage] Error loading conversations list:', error);
+      return [];
+    }
+  };
+
+  // Save conversations list to localStorage
+  const saveConversationsList = (conversationsList) => {
+    try {
+      console.log('[localStorage] Saving conversations list:', conversationsList.length, 'items');
+      localStorage.setItem(CONVERSATIONS_LIST_KEY, JSON.stringify(conversationsList));
+      console.log('[localStorage] ✓ Saved conversations list');
+    } catch (error) {
+      console.error('[localStorage] Error saving conversations list:', error);
+    }
+  };
+
+  // Load a specific conversation from localStorage
+  const loadConversation = (conversationId) => {
+    try {
+      console.log('[localStorage] Loading conversation:', conversationId);
+      const stored = localStorage.getItem(CONVERSATION_PREFIX + conversationId);
+      const parsed = stored ? JSON.parse(stored) : null;
+
+      // SAFETY: Validate and sanitize message content
+      if (parsed && parsed.messages && Array.isArray(parsed.messages)) {
+        let hadCorruption = false;
+        parsed.messages = parsed.messages.map((msg, index) => {
+          // Ensure content is always a string
+          if (typeof msg.content !== 'string') {
+            console.warn(`[localStorage] Message ${index} has non-string content:`, typeof msg.content);
+            hadCorruption = true;
+            msg.content = String(msg.content || '[Invalid message content]');
+          }
+          // Also check displayContent if it exists
+          if (msg.displayContent && typeof msg.displayContent !== 'string') {
+            console.warn(`[localStorage] Message ${index} has non-string displayContent:`, typeof msg.displayContent);
+            hadCorruption = true;
+            msg.displayContent = String(msg.displayContent || '');
+          }
+          return msg;
+        });
+
+        if (hadCorruption) {
+          console.warn('[localStorage] ⚠️ Found and fixed corrupted message data, re-saving conversation');
+          // Re-save the sanitized data
+          saveConversation(conversationId, parsed);
+        }
+      }
+
+      console.log('[localStorage] Conversation loaded:', !!parsed);
+      return parsed;
+    } catch (error) {
+      console.error('[localStorage] Error loading conversation:', error);
+      return null;
+    }
+  };
+
+  // Save current conversation to localStorage
+  const saveConversation = (conversationId, conversationData) => {
+    try {
+      console.log('[localStorage] Saving conversation:', conversationId);
+
+      // SAFETY: Sanitize messages before saving
+      if (conversationData.messages && Array.isArray(conversationData.messages)) {
+        conversationData.messages = conversationData.messages.map((msg, index) => {
+          // Create a clean copy of the message
+          const cleanMsg = { ...msg };
+
+          // Ensure content is always a string
+          if (typeof cleanMsg.content !== 'string') {
+            console.warn(`[localStorage] Sanitizing message ${index} content before save:`, typeof cleanMsg.content);
+            cleanMsg.content = String(cleanMsg.content || '[Invalid message content]');
+          }
+
+          // Also check displayContent if it exists
+          if (cleanMsg.displayContent && typeof cleanMsg.displayContent !== 'string') {
+            console.warn(`[localStorage] Sanitizing message ${index} displayContent before save:`, typeof cleanMsg.displayContent);
+            cleanMsg.displayContent = String(cleanMsg.displayContent || '');
+          }
+
+          return cleanMsg;
+        });
+      }
+
+      localStorage.setItem(CONVERSATION_PREFIX + conversationId, JSON.stringify(conversationData));
+      console.log('[localStorage] ✓ Saved conversation data');
+    } catch (error) {
+      console.error('[localStorage] Error saving conversation:', error);
+    }
+  };
+
+  // Delete a conversation from localStorage
+  const deleteConversation = (conversationId) => {
+    try {
+      localStorage.removeItem(CONVERSATION_PREFIX + conversationId);
+      const list = loadConversationsList();
+      const updatedList = list.filter(conv => conv.id !== conversationId);
+      saveConversationsList(updatedList);
+      setConversations(updatedList);
+    } catch (error) {
+      console.error('Error deleting conversation:', error);
+    }
+  };
+
+  // Load API key and conversations from localStorage on mount
   useEffect(() => {
+    console.log('[MOUNT] Loading from localStorage...');
+
     const storedKey = localStorage.getItem('anthropic_api_key');
     if (storedKey) {
       setApiKey(storedKey);
@@ -132,6 +277,38 @@ function App() {
     const storedAutoFormat = localStorage.getItem('auto_format_tabular');
     if (storedAutoFormat !== null) {
       setAutoFormatTabular(storedAutoFormat === 'true');
+    }
+
+    // Load conversations list
+    const conversationsList = loadConversationsList();
+    console.log('[MOUNT] Found', conversationsList.length, 'conversations in localStorage');
+    setConversations(conversationsList);
+
+    // Load last active conversation if available
+    if (conversationsList.length > 0) {
+      const lastConversation = conversationsList[0]; // Most recent first
+      console.log('[MOUNT] Loading last conversation:', lastConversation.title);
+      const conversationData = loadConversation(lastConversation.id);
+
+      if (conversationData) {
+        console.log('[MOUNT] Conversation data loaded:', {
+          messages: conversationData.messages?.length || 0,
+          codeCards: conversationData.codeCards?.length || 0,
+          hasOutput: !!conversationData.currentOutput
+        });
+
+        setCurrentConversationId(lastConversation.id);
+        setMessages(conversationData.messages || []);
+        setCodeCards(conversationData.codeCards || []);
+        setCurrentOutput(conversationData.currentOutput || null);
+        setCurrentCode(conversationData.currentCode || '');
+        setDatasetRegistry(conversationData.datasetRegistry || { activeDataset: null, datasets: {} });
+        console.log('[MOUNT] ✓ Loaded conversation:', lastConversation.title);
+      } else {
+        console.warn('[MOUNT] Failed to load conversation data for:', lastConversation.id);
+      }
+    } else {
+      console.log('[MOUNT] No conversations to load');
     }
   }, []);
 
@@ -215,6 +392,94 @@ function App() {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [showSlashMenu]);
+
+  // Auto-save conversation with debouncing (500ms)
+  useEffect(() => {
+    console.log('[AUTO-SAVE] Effect triggered. ConvID:', currentConversationId, 'Messages:', messages.length);
+
+    // Only save if we have a current conversation and at least one message
+    if (!currentConversationId || messages.length === 0) {
+      console.log('[AUTO-SAVE] Skipping save - no conversation or no messages');
+      return;
+    }
+
+    console.log('[AUTO-SAVE] Scheduling save in 500ms...');
+    const timeoutId = setTimeout(() => {
+      console.log('[AUTO-SAVE] Saving now...');
+
+      const conversationData = {
+        messages,
+        codeCards,
+        currentOutput,
+        currentCode,
+        datasetRegistry
+      };
+
+      saveConversation(currentConversationId, conversationData);
+      console.log('[AUTO-SAVE] Saved conversation data to localStorage');
+
+      // Update metadata in conversations list
+      const list = loadConversationsList();
+      console.log('[AUTO-SAVE] Loaded conversations list:', list.length, 'conversations');
+
+      const conversationIndex = list.findIndex(c => c.id === currentConversationId);
+      if (conversationIndex !== -1) {
+        list[conversationIndex].lastModifiedAt = new Date().toISOString();
+        list[conversationIndex].messageCount = messages.length;
+
+        // Move to front (most recent)
+        const [conversation] = list.splice(conversationIndex, 1);
+        list.unshift(conversation);
+
+        saveConversationsList(list);
+        setConversations(list);
+        console.log('[AUTO-SAVE] Updated conversation metadata');
+      } else {
+        console.warn('[AUTO-SAVE] Conversation not found in list!', currentConversationId);
+      }
+
+      console.log('[AUTO-SAVE] ✓ Auto-save complete for:', currentConversationId);
+    }, 500);
+
+    return () => {
+      console.log('[AUTO-SAVE] Cleanup - clearing timeout');
+      clearTimeout(timeoutId);
+    };
+  }, [messages, codeCards, currentOutput, currentCode, datasetRegistry, currentConversationId]);
+
+  // Save immediately before page unload (don't wait for debounce)
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      console.log('[BEFORE UNLOAD] Saving conversation immediately...');
+      if (currentConversationId && messages.length > 0) {
+        const conversationData = {
+          messages,
+          codeCards,
+          currentOutput,
+          currentCode,
+          datasetRegistry
+        };
+
+        saveConversation(currentConversationId, conversationData);
+
+        // Update metadata
+        const list = loadConversationsList();
+        const conversationIndex = list.findIndex(c => c.id === currentConversationId);
+        if (conversationIndex !== -1) {
+          list[conversationIndex].lastModifiedAt = new Date().toISOString();
+          list[conversationIndex].messageCount = messages.length;
+          const [conversation] = list.splice(conversationIndex, 1);
+          list.unshift(conversation);
+          saveConversationsList(list);
+        }
+
+        console.log('[BEFORE UNLOAD] ✓ Saved before unload');
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [currentConversationId, messages, codeCards, currentOutput, currentCode, datasetRegistry]);
 
   // Initialize Split.js for resizable panels
   useEffect(() => {
@@ -892,6 +1157,8 @@ Please respond with a JSON object in this format:
 
   // Handle new conversation - reset all panels
   const handleNewConversation = async () => {
+    // Reset conversation state
+    setCurrentConversationId(null);
     setMessages([]);
     setCodeCards([]);
     setSelectedCardId(null);
@@ -911,6 +1178,8 @@ Please respond with a JSON object in this format:
     } catch (error) {
       console.error('Error clearing workspace:', error);
     }
+
+    console.log('New conversation started');
   };
 
   // Toggle conversations menu
@@ -918,11 +1187,125 @@ Please respond with a JSON object in this format:
     setShowConversationsMenu(!showConversationsMenu);
   };
 
+  // Switch to a different conversation
+  const handleSwitchConversation = (conversationId) => {
+    if (conversationId === currentConversationId) {
+      setShowConversationsMenu(false);
+      return;
+    }
+
+    const conversationData = loadConversation(conversationId);
+    if (conversationData) {
+      setCurrentConversationId(conversationId);
+      setMessages(conversationData.messages || []);
+      setCodeCards(conversationData.codeCards || []);
+      setCurrentOutput(conversationData.currentOutput || null);
+      setCurrentCode(conversationData.currentCode || '');
+      setDatasetRegistry(conversationData.datasetRegistry || { activeDataset: null, datasets: {} });
+
+      // Update last modified time and move to front
+      const list = loadConversationsList();
+      const conversationIndex = list.findIndex(c => c.id === conversationId);
+      if (conversationIndex !== -1) {
+        const [conversation] = list.splice(conversationIndex, 1);
+        conversation.lastModifiedAt = new Date().toISOString();
+        list.unshift(conversation);
+        saveConversationsList(list);
+        setConversations(list);
+      }
+
+      setShowConversationsMenu(false);
+      console.log('Switched to conversation:', conversationId);
+    }
+  };
+
+  // Delete conversation with confirmation
+  const handleDeleteConversation = (conversationId, event) => {
+    event.stopPropagation();
+    setShowDeleteConfirm(conversationId);
+  };
+
+  const confirmDeleteConversation = () => {
+    if (showDeleteConfirm) {
+      deleteConversation(showDeleteConfirm);
+
+      // If we deleted the current conversation, switch to the newest one or clear
+      if (showDeleteConfirm === currentConversationId) {
+        const remainingConversations = loadConversationsList();
+        if (remainingConversations.length > 0) {
+          handleSwitchConversation(remainingConversations[0].id);
+        } else {
+          // No conversations left, start fresh
+          setCurrentConversationId(null);
+          setMessages([]);
+          setCodeCards([]);
+          setCurrentOutput(null);
+          setCurrentCode('');
+        }
+      }
+
+      setShowDeleteConfirm(null);
+      console.log('Deleted conversation:', showDeleteConfirm);
+    }
+  };
+
+  const cancelDeleteConversation = () => {
+    setShowDeleteConfirm(null);
+  };
+
+  // Start editing conversation title
+  const handleStartEditTitle = (conversationId, currentTitle, event) => {
+    event.stopPropagation();
+    setEditingConversationId(conversationId);
+    setEditingTitle(currentTitle);
+  };
+
+  // Save edited conversation title
+  const handleSaveTitle = () => {
+    if (editingConversationId && editingTitle.trim()) {
+      const list = loadConversationsList();
+      const conversationIndex = list.findIndex(c => c.id === editingConversationId);
+
+      if (conversationIndex !== -1) {
+        // Ensure title is unique
+        const otherTitles = list
+          .filter(c => c.id !== editingConversationId)
+          .map(c => c.title);
+
+        let newTitle = editingTitle.trim();
+        let counter = 1;
+        const baseTitle = newTitle;
+
+        while (otherTitles.includes(newTitle)) {
+          newTitle = `${baseTitle} (${counter})`;
+          counter++;
+        }
+
+        list[conversationIndex].title = newTitle;
+        saveConversationsList(list);
+        setConversations(list);
+
+        console.log('Renamed conversation:', newTitle);
+      }
+
+      setEditingConversationId(null);
+      setEditingTitle('');
+    }
+  };
+
+  // Cancel editing conversation title
+  const handleCancelEditTitle = () => {
+    setEditingConversationId(null);
+    setEditingTitle('');
+  };
+
   // Handle suggestion click - populate input field but don't submit
   const handleSuggestionClick = (suggestion, event) => {
     // SAFETY: Ensure suggestion is always a plain string, never an object or DOM element
     // Interactive suggestions pass suggestion.text objects, while plain suggestions pass strings
-    const suggestionText = typeof suggestion === 'string' ? suggestion : String(suggestion?.text || suggestion || '');
+    const suggestionText = typeof suggestion === 'string'
+      ? suggestion
+      : (suggestion?.text || String(suggestion || ''));
 
     // Remove focus from the button to prevent blue outline
     if (event?.currentTarget) {
@@ -1093,7 +1476,14 @@ Please respond with a JSON object in this format:
   const handleSendMessage = async (messageOverride = null) => {
     // SAFETY: Ensure message is always a string, never an object or DOM element
     const rawMessage = messageOverride || inputValue;
+
+    // DEBUG: Log what we received
+    console.log('[handleSendMessage] rawMessage type:', typeof rawMessage, 'value:', rawMessage);
+
     const messageToSend = (typeof rawMessage === 'string' ? rawMessage : String(rawMessage || '')).trim();
+
+    console.log('[handleSendMessage] messageToSend:', messageToSend);
+
     if (!messageToSend || isLoading) return;
 
     // Clear any pending auto-submit timer
@@ -1109,12 +1499,82 @@ Please respond with a JSON object in this format:
     setInputValue('');
     setIsLoading(true);
 
+    // Create new conversation if needed (no conversation ID exists)
+    let conversationId = currentConversationId;
+    if (!conversationId) {
+      console.log('[NEW CONVERSATION] No conversation ID - creating new conversation...');
+
+      // Check if we need to limit conversations
+      const existingConversations = loadConversationsList();
+      console.log('[NEW CONVERSATION] Existing conversations:', existingConversations.length);
+
+      if (existingConversations.length >= MAX_CONVERSATIONS) {
+        console.log('[NEW CONVERSATION] Limit reached, deleting oldest...');
+        // Show confirmation dialog (will be handled by UI)
+        setShowLimitConfirm(true);
+        // For now, delete oldest conversation automatically
+        const oldestConversation = existingConversations[existingConversations.length - 1];
+        deleteConversation(oldestConversation.id);
+      }
+
+      // Generate unique title - use first existing message if available, otherwise use current message
+      const titleSource = messages.length > 0 ? messages[0].content : userMessage;
+      const existingTitles = existingConversations.map(c => c.title);
+      const title = generateUniqueTitle(titleSource, existingTitles);
+      console.log('[NEW CONVERSATION] Generated title:', title, '(from', messages.length > 0 ? 'existing messages' : 'current message', ')');
+
+      // Create new conversation
+      conversationId = `conv_${Date.now()}`;
+      const newConversation = {
+        id: conversationId,
+        title,
+        createdAt: new Date().toISOString(),
+        lastModifiedAt: new Date().toISOString(),
+        messageCount: messages.length, // Account for existing messages
+        datasetName: datasetRegistry.activeDataset || null
+      };
+
+      console.log('[NEW CONVERSATION] Conversation object:', newConversation);
+
+      // Add to conversations list (at the front)
+      const updatedList = [newConversation, ...existingConversations];
+      saveConversationsList(updatedList);
+      setConversations(updatedList);
+      setCurrentConversationId(conversationId);
+
+      // If there are existing messages, save them immediately
+      if (messages.length > 0) {
+        console.log('[NEW CONVERSATION] Saving', messages.length, 'existing messages immediately...');
+        const conversationData = {
+          messages,
+          codeCards,
+          currentOutput,
+          currentCode,
+          datasetRegistry
+        };
+        saveConversation(conversationId, conversationData);
+      }
+
+      console.log('[NEW CONVERSATION] ✓ Created and saved conversation:', conversationId);
+    }
+
     // Add user message to chat
+    // SAFETY: Triple-check that userMessage is a string before creating message object
+    if (typeof userMessage !== 'string') {
+      console.error('[handleSendMessage] CRITICAL: userMessage is not a string!', {
+        type: typeof userMessage,
+        value: userMessage
+      });
+    }
+
     const newUserMessage = {
       id: Date.now(),
       role: 'user',
-      content: userMessage
+      content: String(userMessage)  // Force string conversion as final safety
     };
+
+    console.log('[handleSendMessage] Created user message:', newUserMessage);
+
     setMessages(prev => [...prev, newUserMessage]);
 
     try {
@@ -1374,6 +1834,17 @@ Please respond with a JSON object in this format:
 
   // Render chat messages
   const renderMessage = (message) => {
+    // SAFETY CHECK: Ensure message.content is always a string
+    if (typeof message.content !== 'string') {
+      console.error('[renderMessage] ERROR: message.content is not a string!', {
+        type: typeof message.content,
+        value: message.content,
+        message: message
+      });
+      // Try to recover by stringifying
+      message.content = String(message.content || '[Invalid message content]');
+    }
+
     // Use displayContent for assistant messages if available, otherwise use content
     const contentToDisplay = message.role === 'assistant' && message.displayContent
       ? message.displayContent
@@ -1391,7 +1862,7 @@ Please respond with a JSON object in this format:
       : { mainContent: contentToDisplay, suggestions: [] };
 
     if (suggestions.length > 0) {
-      console.log('[renderMessage] Rendering', suggestions.length, 'suggestions. First suggestion type:', typeof suggestions[0]);
+      console.log('[renderMessage] Rendering', suggestions.length, 'suggestions');
     }
 
     // Debug logging for content type
@@ -1694,9 +2165,109 @@ Please respond with a JSON object in this format:
                 title="View conversations"
               />
               {showConversationsMenu && (
-                <div className="absolute top-full left-0 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg p-4 min-w-[200px] z-50">
-                  <p className="text-sm text-gray-700">Conversations will appear here</p>
-                  <p className="text-xs text-gray-500 mt-2">Coming soon...</p>
+                <div className="absolute top-full left-0 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg min-w-[350px] max-w-[500px] max-h-[500px] overflow-y-auto z-50">
+                  {conversations.length === 0 ? (
+                    <div className="p-4 text-center">
+                      <p className="text-sm text-gray-700">No conversations yet</p>
+                      <p className="text-xs text-gray-500 mt-2">Start a new conversation to begin</p>
+                    </div>
+                  ) : (
+                    <div className="py-1">
+                      {conversations.map((conv) => (
+                        <div
+                          key={conv.id}
+                          className={`px-3 py-2 hover:bg-gray-50 cursor-pointer transition-colors border-b border-gray-100 last:border-b-0 ${
+                            conv.id === currentConversationId ? 'bg-blue-50' : ''
+                          }`}
+                          onClick={() => handleSwitchConversation(conv.id)}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              {editingConversationId === conv.id ? (
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="text"
+                                    value={editingTitle}
+                                    onChange={(e) => setEditingTitle(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') handleSaveTitle();
+                                      if (e.key === 'Escape') handleCancelEditTitle();
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded"
+                                    autoFocus
+                                  />
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleSaveTitle();
+                                    }}
+                                    className="text-xs text-green-600 hover:text-green-700 px-1"
+                                    title="Save"
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleCancelEditTitle();
+                                    }}
+                                    className="text-xs text-red-600 hover:text-red-700 px-1"
+                                    title="Cancel"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <p className="text-sm font-medium text-gray-900 truncate">
+                                    {conv.title}
+                                  </p>
+                                  {conv.id === currentConversationId && (
+                                    <span className="text-xs text-blue-600 font-medium">Active</span>
+                                  )}
+                                </div>
+                              )}
+                              <div className="flex items-center gap-2 mt-1">
+                                <p className="text-xs text-gray-500">
+                                  {new Date(conv.lastModifiedAt).toLocaleString('en-US', {
+                                    month: 'short',
+                                    day: 'numeric',
+                                    hour: 'numeric',
+                                    minute: '2-digit'
+                                  })}
+                                </p>
+                                <span className="text-xs text-gray-400">•</span>
+                                <p className="text-xs text-gray-500">
+                                  {conv.messageCount} {conv.messageCount === 1 ? 'message' : 'messages'}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={(e) => handleStartEditTitle(conv.id, conv.title, e)}
+                                className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                                title="Rename"
+                              >
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                </svg>
+                              </button>
+                              <button
+                                onClick={(e) => handleDeleteConversation(conv.id, e)}
+                                className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                                title="Delete"
+                              >
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1816,6 +2387,25 @@ Please respond with a JSON object in this format:
               title="Update Anthropic API key"
             >
               Update API Key
+            </button>
+            <button
+              onClick={() => {
+                const list = loadConversationsList();
+                console.log('=== MANUAL DEBUG CHECK ===');
+                console.log('Current Conversation ID:', currentConversationId);
+                console.log('Messages count:', messages.length);
+                console.log('Conversations in localStorage:', list.length);
+                console.log('Conversations list:', list);
+                if (currentConversationId) {
+                  const conv = loadConversation(currentConversationId);
+                  console.log('Current conversation data:', conv);
+                }
+                alert(`Conversations: ${list.length}\nCurrent ID: ${currentConversationId || 'none'}\nMessages: ${messages.length}\n\nCheck console for details.`);
+              }}
+              className="px-2 py-0.5 bg-gray-200 hover:bg-gray-300 text-gray-700 border border-gray-300 rounded transition-all text-[10px] font-medium ml-2"
+              title="Debug localStorage"
+            >
+              Debug Storage
             </button>
           </div>
         </div>
@@ -1957,7 +2547,7 @@ Please respond with a JSON object in this format:
               </button>
               <button
                 ref={submitButtonRef}
-                onClick={handleSendMessage}
+                onClick={() => handleSendMessage()}
                 disabled={isLoading || !inputValue.trim()}
                 className={`absolute right-1 top-1 w-8 h-8 rounded-md text-white bg-[#3a7aaf] hover:bg-[#2d6290] disabled:bg-[#c0c0c0] disabled:cursor-not-allowed transition-colors flex items-center justify-center overflow-hidden ${isSubmitAnimating ? 'submit-button-animating' : ''}`}
                 style={isSubmitAnimating ? { backgroundColor: '#3a7aaf' } : {}}
@@ -2077,6 +2667,32 @@ Please respond with a JSON object in this format:
         onClose={() => setShowSnowflakeModal(false)}
         onLoad={handleLoadSnowflakeTables}
       />
+
+      {/* Delete Conversation Confirmation Dialog */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100]">
+          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete Conversation?</h3>
+            <p className="text-sm text-gray-600 mb-6">
+              Are you sure you want to delete this conversation? This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={cancelDeleteConversation}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteConversation}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
