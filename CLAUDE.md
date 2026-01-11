@@ -77,15 +77,41 @@ A mode selector control has been added to the center of the toolbar to switch be
 
 ### Report Mode Content
 
-The report panel currently shows placeholder content:
-- Heading: "Report"
-- Placeholder text: "Report mode is now active. This is where your generated report will appear."
+The report panel shows **dynamic, live-updating content** based on the current state of the analysis:
+
+#### Empty State
+- **When**: No dataset has been loaded
+- **Display**: "Empty Report" in large, light gray text centered at the top
+
+#### Dataset Loaded
+- **Title**: Automatically extracted from the "Subject" section of the dataset analysis
+  - First sentence only, maximum 10 words
+  - Displayed in large black text at the top
+- **Description**: Full text from the "Subject" section
+  - Displayed as a paragraph immediately below the title
+
+#### Favorited Outputs
+- **When a user favorites an output** (clicks the star icon):
+  - Claude generates a concise 2-3 sentence description of the output
+  - The output (text, plot, or both) is added to the report
+  - Description + output appear in the report panel
+- **When a user unfavorites an output**:
+  - The output and its description are immediately removed from the report
+- **Output rendering**:
+  - Text output: Rendered as HTML
+  - Plots: Displayed as images with rounded corners and shadow
+  - Errors: Shown in red error boxes
+
+#### Dynamic Updates
+- Report state is maintained across mode switches
+- Switching between Explore and Report modes shows the current report state
+- No "generate report" button needed - report is always current
 
 **Future Enhancements:**
-- Add report generation functionality
-- Integrate with Claude to generate formatted reports
-- Support markdown/HTML rendering
 - Add export capabilities (PDF, DOCX, etc.)
+- Allow manual editing of descriptions
+- Support custom report sections
+- Add drag-and-drop reordering of favorited outputs
 
 ### Code Reference
 
