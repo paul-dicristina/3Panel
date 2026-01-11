@@ -43,7 +43,7 @@ function App() {
   const [currentCode, setCurrentCode] = useState('');
 
   // UI state
-  const [viewMode, setViewMode] = useState('explore'); // 'explore' or 'data'
+  const [viewMode, setViewMode] = useState('explore'); // 'explore' or 'document'
   const [dataFrames, setDataFrames] = useState([]);
   const [suggestionsEnabled, setSuggestionsEnabled] = useState(true);
   const [autoFormatTabular, setAutoFormatTabular] = useState(true);
@@ -218,9 +218,7 @@ function App() {
 
   // Initialize Split.js for resizable panels
   useEffect(() => {
-    // Only initialize Split.js in explore mode
-    if (viewMode !== 'explore') return;
-
+    // Initialize Split.js for panel resizing
     // Horizontal split (left panel | right column)
     if (!splitInstanceRef.current) {
       splitInstanceRef.current = Split(['#left-panel', '#right-column'], {
@@ -257,7 +255,7 @@ function App() {
         splitVerticalInstanceRef.current = null;
       }
     };
-  }, [viewMode]);
+  }, []);
 
   // Handle keyboard navigation for code cards
   useEffect(() => {
@@ -310,23 +308,23 @@ function App() {
     };
   }, [codeCards, selectedCardId]);
 
-  // Fetch dataframes when viewMode is 'data'
-  useEffect(() => {
-    if (viewMode === 'data') {
-      const fetchDataFrames = async () => {
-        try {
-          const response = await fetch('/api/list-dataframes');
-          if (response.ok) {
-            const data = await response.json();
-            setDataFrames(data.dataframes || []);
-          }
-        } catch (error) {
-          console.error('Error fetching dataframes:', error);
-        }
-      };
-      fetchDataFrames();
-    }
-  }, [viewMode]);
+  // Fetch dataframes when viewMode is 'data' - DISABLED (not using data view)
+  // useEffect(() => {
+  //   if (viewMode === 'data') {
+  //     const fetchDataFrames = async () => {
+  //       try {
+  //         const response = await fetch('/api/list-dataframes');
+  //         if (response.ok) {
+  //           const data = await response.json();
+  //           setDataFrames(data.dataframes || []);
+  //         }
+  //       } catch (error) {
+  //         console.error('Error fetching dataframes:', error);
+  //       }
+  //     };
+  //     fetchDataFrames();
+  //   }
+  // }, [viewMode]);
 
   // Handle API key save
   const handleSaveApiKey = (key) => {
@@ -1626,41 +1624,54 @@ Please respond with a JSON object in this format:
       {/* Header */}
       <header className="bg-[#edeff0] h-[26px] relative">
         <div className="flex items-center justify-between h-full px-3">
-          {/* iOS-style segmented control - HIDDEN FOR NOW */}
-          {/* <div className="absolute left-1/2 transform -translate-x-1/2 flex items-center h-full">
-            <div className="relative inline-flex bg-gray-200 rounded-md p-0.5">
+          {/* Mode selector control */}
+          <div className="absolute left-1/2 transform -translate-x-1/2 flex items-center h-full">
+            <div
+              className="relative inline-flex items-center rounded-full"
+              style={{
+                width: '160px',
+                height: '21px',
+                backgroundColor: '#dcdce2'
+              }}
+            >
+              {/* Animated selector pill */}
               <div
-                className="absolute top-0.5 bottom-0.5 bg-white rounded transition-all duration-200 ease-out shadow-sm"
+                className="absolute rounded-full transition-all duration-300 ease-in-out"
                 style={{
-                  ...(viewMode === 'explore'
-                    ? { left: '2px' }
-                    : { right: '2px' }
-                  ),
-                  width: 'calc(50% - 2px)'
+                  width: '77px',
+                  height: '19px',
+                  backgroundColor: 'white',
+                  boxShadow: '0px 1px 3px rgba(0, 0, 0, 0.1)',
+                  left: viewMode === 'explore' ? '1px' : '82px',
+                  top: '1px'
                 }}
               />
+              {/* Explore button */}
               <button
                 onClick={() => setViewMode('explore')}
-                className={`relative z-10 px-3.5 py-0.5 text-xs font-medium transition-colors duration-200 ${
+                className={`relative z-10 flex-1 text-sm font-medium transition-colors duration-200 ${
                   viewMode === 'explore'
                     ? 'text-gray-900'
                     : 'text-gray-600'
                 }`}
+                style={{ fontSize: '11px' }}
               >
                 Explore
               </button>
+              {/* Document button */}
               <button
-                onClick={() => setViewMode('data')}
-                className={`relative z-10 px-3.5 py-0.5 text-xs font-medium transition-colors duration-200 ${
-                  viewMode === 'data'
+                onClick={() => setViewMode('document')}
+                className={`relative z-10 flex-1 text-sm font-medium transition-colors duration-200 ${
+                  viewMode === 'document'
                     ? 'text-gray-900'
                     : 'text-gray-600'
                 }`}
+                style={{ fontSize: '11px' }}
               >
-                Data
+                Document
               </button>
             </div>
-          </div> */}
+          </div>
 
           <div className="flex items-center gap-2 h-full relative">
             <img
@@ -1822,8 +1833,7 @@ Please respond with a JSON object in this format:
       </header>
 
       {/* Main content area */}
-      {viewMode === 'explore' ? (
-        <div key="explore-mode" className="flex-1 flex overflow-hidden">
+      <div key="explore-mode" className="flex-1 flex overflow-hidden">
           {/* Left Panel - Interaction Panel */}
           <div id="left-panel" ref={leftPanelRef} tabIndex={0} className="flex flex-col bg-white focus:outline-none rounded-[10px]">
           {/* Messages area */}
@@ -2031,25 +2041,6 @@ Please respond with a JSON object in this format:
           </div>
         </div>
         </div>
-      ) : (
-        <div key="data-mode" className="flex-1 overflow-hidden bg-white m-4 rounded-lg p-6">
-          <h2 className="text-2xl font-semibold mb-4">Loaded Datasets</h2>
-          {dataFrames.length > 0 ? (
-            <div className="space-y-2">
-              {dataFrames.map((df, index) => (
-                <div key={index} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
-                  <div>
-                    <span className="font-semibold text-lg">{df.name}</span>
-                    <span className="text-gray-600 ml-4">{df.rows} rows × {df.cols} columns</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-gray-500">No data frames loaded</p>
-          )}
-        </div>
-      )}
 
       {/* Hidden file input for load data */}
       <input
