@@ -57,6 +57,12 @@ function App() {
   });
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [favoritedCardIds, setFavoritedCardIds] = useState(new Set());
+
+  // Report state - tracks dynamic report content
+  const [reportTitle, setReportTitle] = useState('');
+  const [reportDescription, setReportDescription] = useState('');
+  const [favoritedOutputDescriptions, setFavoritedOutputDescriptions] = useState({});
+
   const [isSubmitAnimating, setIsSubmitAnimating] = useState(false);
   const [expandedSuggestions, setExpandedSuggestions] = useState(new Set()); // Track which message IDs have expanded suggestions
   const [isRecording, setIsRecording] = useState(false);
@@ -676,6 +682,20 @@ Please respond with a JSON object in this format:
           console.log('reportSections:', result.reportSections);
           console.log('filename:', result.filename);
 
+          // Extract report title and description from reportSections
+          if (result.reportSections && result.reportSections.subject) {
+            // Use first sentence from subject as title (max 10 words)
+            const subjectText = result.reportSections.subject;
+            const firstSentence = subjectText.split('.')[0] + '.';
+            const words = firstSentence.split(' ').slice(0, 10).join(' ');
+            setReportTitle(words);
+            setReportDescription(subjectText);
+          } else if (result.filename) {
+            // Fallback: use filename
+            setReportTitle(`Dataset: ${result.filename}`);
+            setReportDescription('');
+          }
+
           // Store column metadata in dataset registry
           if (result.columnMetadata) {
             const datasetName = result.datasetName || 'data';  // Default to 'data'
@@ -842,6 +862,20 @@ Please respond with a JSON object in this format:
           // Also update legacy columnMetadata for backward compatibility
           setColumnMetadata(result.columnMetadata);
           console.log(`Dataset registry updated for '${datasetName}':`, result.columnMetadata);
+        }
+
+        // Extract report title and description from reportSections
+        if (result.reportSections && result.reportSections.subject) {
+          // Use first sentence from subject as title (max 10 words)
+          const subjectText = result.reportSections.subject;
+          const firstSentence = subjectText.split('.')[0] + '.';
+          const words = firstSentence.split(' ').slice(0, 10).join(' ');
+          setReportTitle(words);
+          setReportDescription(subjectText);
+        } else {
+          // Fallback: use table name
+          setReportTitle(`Dataset: ${fullTableName}`);
+          setReportDescription('');
         }
 
         // Validate we have report sections
@@ -1262,9 +1296,64 @@ Please respond with a JSON object in this format:
     }
   };
 
+  // Generate description for a favorited output
+  const generateFavoritedDescription = async (cardId) => {
+    const card = codeCards.find(c => c.id === cardId);
+    if (!card) return;
+
+    try {
+      // Create a prompt to generate a short description
+      const prompt = `You are analyzing R code output for a data analysis report.
+
+The R code executed was:
+\`\`\`r
+${card.code}
+\`\`\`
+
+Please write a single, concise paragraph (2-3 sentences) describing what this output shows. Focus on the key findings or insights, not the technical details of how it was generated.
+
+Keep it professional and suitable for a data analysis report.`;
+
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          apiKey: apiKey,
+          messages: [{ role: 'user', content: prompt }],
+          suggestionsEnabled: false
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate description');
+      }
+
+      const result = await response.json();
+      const description = result.content || 'Analysis output';
+
+      // Store the description
+      setFavoritedOutputDescriptions(prev => ({
+        ...prev,
+        [cardId]: description
+      }));
+
+    } catch (error) {
+      console.error('Error generating description:', error);
+      // Use a fallback description
+      setFavoritedOutputDescriptions(prev => ({
+        ...prev,
+        [cardId]: card.summary || 'Analysis output'
+      }));
+    }
+  };
+
   // Toggle favorite status for currently selected card
-  const handleToggleFavorite = () => {
+  const handleToggleFavorite = async () => {
     if (selectedCardId) {
+      const wasFavorited = favoritedCardIds.has(selectedCardId);
+
       setFavoritedCardIds(prev => {
         const newSet = new Set(prev);
         if (newSet.has(selectedCardId)) {
@@ -1274,6 +1363,18 @@ Please respond with a JSON object in this format:
         }
         return newSet;
       });
+
+      if (wasFavorited) {
+        // Remove description when unfavoriting
+        setFavoritedOutputDescriptions(prev => {
+          const newDescriptions = { ...prev };
+          delete newDescriptions[selectedCardId];
+          return newDescriptions;
+        });
+      } else {
+        // Generate description when favoriting
+        await generateFavoritedDescription(selectedCardId);
+      }
     }
   };
 
@@ -2058,14 +2159,74 @@ Please respond with a JSON object in this format:
           /* Report Mode - Single full-height panel */
           <div id="report-panel" className="flex-1 bg-white border-l border-gray-200 overflow-auto rounded-[10px]">
             <div className="h-full p-6">
-              <div className="max-w-4xl mx-auto">
-                <h1 className="text-2xl font-bold mb-4 text-gray-900">Report</h1>
-                <div className="prose prose-sm max-w-none">
-                  <p className="text-gray-600">
-                    Report mode is now active. This is where your generated report will appear.
-                  </p>
+              {!reportTitle ? (
+                /* Empty state - no dataset loaded */
+                <div className="flex items-start justify-center pt-16">
+                  <p className="text-5xl font-light text-gray-300">Empty Report</p>
                 </div>
-              </div>
+              ) : (
+                /* Report content */
+                <div className="max-w-4xl mx-auto">
+                  {/* Dataset title */}
+                  <h1 className="text-2xl font-bold mb-3 text-gray-900">{reportTitle}</h1>
+
+                  {/* Dataset description */}
+                  {reportDescription && (
+                    <p className="text-base text-gray-700 mb-8 leading-relaxed">{reportDescription}</p>
+                  )}
+
+                  {/* Favorited outputs */}
+                  {Array.from(favoritedCardIds).map(cardId => {
+                    const card = codeCards.find(c => c.id === cardId);
+                    if (!card) return null;
+
+                    const description = favoritedOutputDescriptions[cardId];
+
+                    return (
+                      <div key={cardId} className="mb-8 pb-8 border-b border-gray-200 last:border-b-0">
+                        {/* Description paragraph */}
+                        {description && (
+                          <p className="text-base text-gray-700 mb-4 leading-relaxed">{description}</p>
+                        )}
+
+                        {/* Output content */}
+                        {card.output && (
+                          <div className="mt-4">
+                            {/* Text output */}
+                            {card.output.text && (
+                              <div
+                                className="text-sm text-gray-800"
+                                dangerouslySetInnerHTML={{ __html: card.output.text }}
+                              />
+                            )}
+
+                            {/* Plot output */}
+                            {card.output.plots && card.output.plots.length > 0 && (
+                              <div className="mt-4">
+                                {card.output.plots.map((plot, idx) => (
+                                  <img
+                                    key={idx}
+                                    src={plot}
+                                    alt={`Plot ${idx + 1}`}
+                                    className="max-w-full h-auto rounded-lg shadow-sm"
+                                  />
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Error output */}
+                            {card.output.error && (
+                              <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-800">
+                                {card.output.error}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         )}
