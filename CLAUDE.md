@@ -17,9 +17,13 @@ This document describes how 3Panel's interactive suggestions and automatic datas
 
 ## Mode Selector Control
 
-**Status:** Implemented (visual only, no functionality yet)
+**Status:** Fully Implemented
 
 A mode selector control has been added to the center of the toolbar to switch between "Explore" and "Report" modes.
+
+**Modes:**
+- **Explore mode**: Users submit prompts → Claude generates R code → Code executes → Output/plots display in split panels (output + code)
+- **Report mode**: Single full-height report panel replaces the output and code panels
 
 ### Design Specifications
 
@@ -59,22 +63,29 @@ A mode selector control has been added to the center of the toolbar to switch be
 - ✅ Buttons are clickable
 - ✅ Selector pill animates smoothly between modes
 - ✅ Text color changes based on selection
-- ❌ **NO effect on app functionality** - view always stays in explore mode
+- ✅ Mode switching is fully functional
+- ✅ Explore mode shows three-panel layout (chat | output | code)
+- ✅ Report mode shows two-panel layout (chat | report)
 
-**Important Notes:**
-1. The `viewMode` state updates but does NOT control what's displayed
-2. Split.js initialization was decoupled from `viewMode` (line 220-258)
-3. Data fetching useEffect for 'data' mode is disabled (line 311-327)
-4. Conditional rendering removed - app always shows explore view (line 1838)
+**Implementation Details:**
+1. Conditional rendering based on `viewMode` state ([src/App.jsx:1995-2058](src/App.jsx#L1995-L2058))
+2. Split.js adapts to mode:
+   - Explore mode: Horizontal split (left-panel | right-column) + Vertical split (output | code)
+   - Report mode: Simple horizontal split (left-panel | report-panel)
+3. Split.js re-initializes when mode changes ([src/App.jsx:220-271](src/App.jsx#L220-L271))
+4. Panel sizes are preserved across mode switches
 
-### Future Implementation
+### Report Mode Content
 
-When Report mode is ready to be implemented:
+The report panel currently shows placeholder content:
+- Heading: "Report"
+- Placeholder text: "Report mode is now active. This is where your generated report will appear."
 
-1. **Add conditional rendering** based on `viewMode` state
-2. **Create Report mode UI** (currently undefined)
-3. **Update Split.js logic** if needed for Report mode layout
-4. **Test mode switching** thoroughly
+**Future Enhancements:**
+- Add report generation functionality
+- Integrate with Claude to generate formatted reports
+- Support markdown/HTML rendering
+- Add export capabilities (PDF, DOCX, etc.)
 
 ### Code Reference
 
