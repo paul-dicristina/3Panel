@@ -218,26 +218,39 @@ function App() {
 
   // Initialize Split.js for resizable panels
   useEffect(() => {
-    // Initialize Split.js for panel resizing
-    // Horizontal split (left panel | right column)
-    if (!splitInstanceRef.current) {
-      splitInstanceRef.current = Split(['#left-panel', '#right-column'], {
-        sizes: savedHorizontalSizesRef.current,
-        minSize: [300, 300],
-        gutterSize: 8,
-        cursor: 'col-resize'
-      });
-    }
+    // Initialize Split.js for panel resizing based on viewMode
 
-    // Vertical split (right top panel | right bottom panel)
-    if (!splitVerticalInstanceRef.current) {
-      splitVerticalInstanceRef.current = Split(['#right-top-panel', '#right-bottom-panel'], {
-        direction: 'vertical',
-        sizes: savedVerticalSizesRef.current,
-        minSize: [100, 100],
-        gutterSize: 8,
-        cursor: 'row-resize'
-      });
+    if (viewMode === 'explore') {
+      // Horizontal split (left panel | right column) - only in Explore mode
+      if (!splitInstanceRef.current) {
+        splitInstanceRef.current = Split(['#left-panel', '#right-column'], {
+          sizes: savedHorizontalSizesRef.current,
+          minSize: [300, 300],
+          gutterSize: 8,
+          cursor: 'col-resize'
+        });
+      }
+
+      // Vertical split (right top panel | right bottom panel) - only in Explore mode
+      if (!splitVerticalInstanceRef.current) {
+        splitVerticalInstanceRef.current = Split(['#right-top-panel', '#right-bottom-panel'], {
+          direction: 'vertical',
+          sizes: savedVerticalSizesRef.current,
+          minSize: [100, 100],
+          gutterSize: 8,
+          cursor: 'row-resize'
+        });
+      }
+    } else if (viewMode === 'report') {
+      // Report mode: Simple horizontal split (left panel | report panel)
+      if (!splitInstanceRef.current) {
+        splitInstanceRef.current = Split(['#left-panel', '#report-panel'], {
+          sizes: savedHorizontalSizesRef.current,
+          minSize: [300, 300],
+          gutterSize: 8,
+          cursor: 'col-resize'
+        });
+      }
     }
 
     // Cleanup
@@ -255,7 +268,7 @@ function App() {
         splitVerticalInstanceRef.current = null;
       }
     };
-  }, []);
+  }, [viewMode]);
 
   // Handle keyboard navigation for code cards
   useEffect(() => {
@@ -1992,54 +2005,70 @@ Please respond with a JSON object in this format:
           </div>
         </div>
 
-        {/* Right Column */}
-        <div id="right-column" className="flex flex-col">
-          {/* Right Top Panel - Output Display */}
-          <div
-            id="right-top-panel"
-            className="bg-white border-l border-gray-200 overflow-hidden relative rounded-[10px]"
-          >
-            <div className="h-full overflow-hidden relative">
-              {renderOutput()}
+        {/* Right Column - Conditional rendering based on viewMode */}
+        {viewMode === 'explore' ? (
+          <div id="right-column" className="flex flex-col">
+            {/* Right Top Panel - Output Display */}
+            <div
+              id="right-top-panel"
+              className="bg-white border-l border-gray-200 overflow-hidden relative rounded-[10px]"
+            >
+              <div className="h-full overflow-hidden relative">
+                {renderOutput()}
+              </div>
+            </div>
+
+            {/* Right Bottom Panel - Code Display */}
+            <div id="right-bottom-panel" className="bg-white border-l border-gray-200 overflow-auto p-4 rounded-[10px]">
+              {currentCode ? (
+                <SyntaxHighlighter
+                  language="r"
+                  style={{
+                    ...chrome,
+                    'hljs-comment': { color: '#5a8c4d' },  // Medium green for comments
+                    'hljs-title': { color: '#0066cc' },    // Blue for function names
+                    'hljs-function': { color: '#0066cc' }, // Blue for function calls
+                    'hljs-name': { color: '#0066cc' },     // Blue for function names
+                    'hljs-keyword': { color: '#a626a4' },  // Purple for keywords
+                    'hljs-string': { color: '#1328a5' },   // Custom blue for strings
+                    'hljs-number': { color: '#986801' },   // Orange for numbers
+                  }}
+                  customStyle={{
+                    fontSize: '10pt',
+                    padding: '16px',
+                    borderRadius: '4px',
+                    border: '1px solid #d1d5db',
+                    margin: 0
+                  }}
+                  showLineNumbers={true}
+                >
+                  {currentCode}
+                </SyntaxHighlighter>
+              ) : (
+                <div className="flex items-center justify-center h-full text-gray-500">
+                  <div className="text-center">
+                    <p>No code selected</p>
+                    <p className="text-sm mt-2">Select a code card to view the code</p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
-
-          {/* Right Bottom Panel - Code Display */}
-          <div id="right-bottom-panel" className="bg-white border-l border-gray-200 overflow-auto p-4 rounded-[10px]">
-            {currentCode ? (
-              <SyntaxHighlighter
-                language="r"
-                style={{
-                  ...chrome,
-                  'hljs-comment': { color: '#5a8c4d' },  // Medium green for comments
-                  'hljs-title': { color: '#0066cc' },    // Blue for function names
-                  'hljs-function': { color: '#0066cc' }, // Blue for function calls
-                  'hljs-name': { color: '#0066cc' },     // Blue for function names
-                  'hljs-keyword': { color: '#a626a4' },  // Purple for keywords
-                  'hljs-string': { color: '#1328a5' },   // Custom blue for strings
-                  'hljs-number': { color: '#986801' },   // Orange for numbers
-                }}
-                customStyle={{
-                  fontSize: '10pt',
-                  padding: '16px',
-                  borderRadius: '4px',
-                  border: '1px solid #d1d5db',
-                  margin: 0
-                }}
-                showLineNumbers={true}
-              >
-                {currentCode}
-              </SyntaxHighlighter>
-            ) : (
-              <div className="flex items-center justify-center h-full text-gray-500">
-                <div className="text-center">
-                  <p>No code selected</p>
-                  <p className="text-sm mt-2">Select a code card to view the code</p>
+        ) : (
+          /* Report Mode - Single full-height panel */
+          <div id="report-panel" className="flex-1 bg-white border-l border-gray-200 overflow-auto rounded-[10px]">
+            <div className="h-full p-6">
+              <div className="max-w-4xl mx-auto">
+                <h1 className="text-2xl font-bold mb-4 text-gray-900">Report</h1>
+                <div className="prose prose-sm max-w-none">
+                  <p className="text-gray-600">
+                    Report mode is now active. This is where your generated report will appear.
+                  </p>
                 </div>
               </div>
-            )}
+            </div>
           </div>
-        </div>
+        )}
         </div>
 
       {/* Hidden file input for load data */}
