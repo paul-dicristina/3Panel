@@ -4,12 +4,157 @@ This document describes how 3Panel's interactive suggestions and automatic datas
 
 ## Table of Contents
 
-1. [Interactive Suggestions Overview](#interactive-suggestions-overview)
-2. [How Interactive Elements Are Created](#how-interactive-elements-are-created)
-3. [Dataset Naming Convention](#dataset-naming-convention)
-4. [Automatic Dataset Tracking](#automatic-dataset-tracking)
-5. [Metadata Flow](#metadata-flow)
-6. [Troubleshooting](#troubleshooting)
+1. [Mode Selector Control](#mode-selector-control)
+2. [Important Bug Fixes](#important-bug-fixes)
+3. [Interactive Suggestions Overview](#interactive-suggestions-overview)
+4. [How Interactive Elements Are Created](#how-interactive-elements-are-created)
+5. [Dataset Naming Convention](#dataset-naming-convention)
+6. [Automatic Dataset Tracking](#automatic-dataset-tracking)
+7. [Metadata Flow](#metadata-flow)
+8. [Troubleshooting](#troubleshooting)
+
+---
+
+## Mode Selector Control
+
+**Status:** Implemented (visual only, no functionality yet)
+
+A mode selector control has been added to the center of the toolbar to switch between "Explore" and "Document" modes.
+
+### Design Specifications
+
+**Background Container:**
+- Width: 160px
+- Height: 21px
+- Background color: #dcdce2
+- Border radius: Full rounded (pill shape)
+- Position: Centered in toolbar
+
+**Selector Pill:**
+- Width: 77px
+- Height: 19px
+- Background: White
+- Drop shadow: `0px 1px 3px rgba(0, 0, 0, 0.1)` (black at 10% opacity, 1px vertical offset, 3px spread)
+- Position: Animates between left (1px) for Explore and right (82px) for Document
+- Animation: 300ms ease-in-out transition
+
+**Text:**
+- Font size: 11px
+- Font weight: Medium
+- Colors:
+  - Selected mode: text-gray-900 (#111827)
+  - Unselected mode: text-gray-600 (#4b5563)
+- Text changes color based on selection
+
+### Implementation Details
+
+**Location:** `src/App.jsx` lines 1629-1676
+
+**State Management:**
+- Uses `viewMode` state: 'explore' or 'document'
+- Buttons are functional and update state
+- Animation triggers on state change
+
+**Current Behavior:**
+- ✅ Buttons are clickable
+- ✅ Selector pill animates smoothly between modes
+- ✅ Text color changes based on selection
+- ❌ **NO effect on app functionality** - view always stays in explore mode
+
+**Important Notes:**
+1. The `viewMode` state updates but does NOT control what's displayed
+2. Split.js initialization was decoupled from `viewMode` (line 220-258)
+3. Data fetching useEffect for 'data' mode is disabled (line 311-327)
+4. Conditional rendering removed - app always shows explore view (line 1838)
+
+### Future Implementation
+
+When Document mode is ready to be implemented:
+
+1. **Add conditional rendering** based on `viewMode` state
+2. **Create Document mode UI** (currently undefined)
+3. **Update Split.js logic** if needed for Document mode layout
+4. **Test mode switching** thoroughly
+
+### Code Reference
+
+```javascript
+// src/App.jsx line 1631-1676
+<div className="absolute left-1/2 transform -translate-x-1/2 flex items-center h-full">
+  <div
+    className="relative inline-flex items-center rounded-full"
+    style={{
+      width: '160px',
+      height: '21px',
+      backgroundColor: '#dcdce2'
+    }}
+  >
+    {/* Animated selector pill */}
+    <div
+      className="absolute rounded-full transition-all duration-300 ease-in-out"
+      style={{
+        width: '77px',
+        height: '19px',
+        backgroundColor: 'white',
+        boxShadow: '0px 1px 3px rgba(0, 0, 0, 0.1)',
+        left: viewMode === 'explore' ? '1px' : '82px',
+        top: '1px'
+      }}
+    />
+    {/* Buttons */}
+    ...
+  </div>
+</div>
+```
+
+---
+
+## Important Bug Fixes
+
+### Manual Prompt Bug Fix (Commit: 961cb37)
+
+**Problem:** When users typed manual prompts and clicked the send button, the click event object was being passed to `handleSendMessage()`, resulting in "[object Object]" appearing in the user message bubble instead of the actual prompt text.
+
+**Root Cause:** Line 1960 in `src/App.jsx` had:
+```javascript
+onClick={handleSendMessage}
+```
+
+This passed the synthetic event object as the first parameter.
+
+**Fix:** Changed to:
+```javascript
+onClick={() => handleSendMessage()}
+```
+
+This wraps the handler in an arrow function, preventing the event from being passed.
+
+**Location:** `src/App.jsx` line 1960
+
+**Commit:** 961cb37 "Prompt fixed - no conversation"
+
+### Conversation Storage Removed
+
+**Important:** This codebase does NOT include conversation persistence/localStorage features.
+
+**Why:** The "manual prompt bug fixed" commit (e15c227) added 639 lines including conversation storage features. These were removed because:
+1. Only the manual prompt fix was needed
+2. Conversation storage was causing view switching issues
+3. Simpler single-session approach preferred
+
+**What was removed:**
+- Conversation list menu
+- localStorage persistence
+- Conversation switching
+- Auto-save functionality
+- Conversation metadata tracking
+
+**Current state:**
+- Single conversation session only
+- No persistence across page reloads
+- Clean, simple user experience
+
+---
 
 ---
 
