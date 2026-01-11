@@ -19,7 +19,7 @@ This document describes how 3Panel's interactive suggestions and automatic datas
 
 **Status:** Implemented (visual only, no functionality yet)
 
-A mode selector control has been added to the center of the toolbar to switch between "Explore" and "Document" modes.
+A mode selector control has been added to the center of the toolbar to switch between "Explore" and "Report" modes.
 
 ### Design Specifications
 
@@ -35,7 +35,7 @@ A mode selector control has been added to the center of the toolbar to switch be
 - Height: 19px
 - Background: White
 - Drop shadow: `0px 1px 3px rgba(0, 0, 0, 0.1)` (black at 10% opacity, 1px vertical offset, 3px spread)
-- Position: Animates between left (1px) for Explore and right (82px) for Document
+- Position: Animates between left (1px) for Explore and right (82px) for Report
 - Animation: 300ms ease-in-out transition
 
 **Text:**
@@ -51,7 +51,7 @@ A mode selector control has been added to the center of the toolbar to switch be
 **Location:** `src/App.jsx` lines 1629-1676
 
 **State Management:**
-- Uses `viewMode` state: 'explore' or 'document'
+- Uses `viewMode` state: 'explore' or 'report'
 - Buttons are functional and update state
 - Animation triggers on state change
 
@@ -69,11 +69,11 @@ A mode selector control has been added to the center of the toolbar to switch be
 
 ### Future Implementation
 
-When Document mode is ready to be implemented:
+When Report mode is ready to be implemented:
 
 1. **Add conditional rendering** based on `viewMode` state
-2. **Create Document mode UI** (currently undefined)
-3. **Update Split.js logic** if needed for Document mode layout
+2. **Create Report mode UI** (currently undefined)
+3. **Update Split.js logic** if needed for Report mode layout
 4. **Test mode switching** thoroughly
 
 ### Code Reference

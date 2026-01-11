@@ -43,7 +43,7 @@ function App() {
   const [currentCode, setCurrentCode] = useState('');
 
   // UI state
-  const [viewMode, setViewMode] = useState('explore'); // 'explore' or 'document'
+  const [viewMode, setViewMode] = useState('explore'); // 'explore' or 'report'
   const [dataFrames, setDataFrames] = useState([]);
   const [suggestionsEnabled, setSuggestionsEnabled] = useState(true);
   const [autoFormatTabular, setAutoFormatTabular] = useState(true);
@@ -1658,17 +1658,17 @@ Please respond with a JSON object in this format:
               >
                 Explore
               </button>
-              {/* Document button */}
+              {/* Report button */}
               <button
-                onClick={() => setViewMode('document')}
+                onClick={() => setViewMode('report')}
                 className={`relative z-10 flex-1 text-sm font-medium transition-colors duration-200 ${
-                  viewMode === 'document'
+                  viewMode === 'report'
                     ? 'text-gray-900'
                     : 'text-gray-600'
                 }`}
                 style={{ fontSize: '11px' }}
               >
-                Document
+                Report
               </button>
             </div>
           </div>
