@@ -1337,7 +1337,15 @@ Keep it professional and suitable for a data analysis report.`;
       }
 
       const result = await response.json();
-      const description = result.content || 'Analysis output';
+      console.log('[Description Generation] API response:', result);
+
+      // Extract text from Anthropic API response format
+      let description = 'Analysis output';
+      if (result.data && result.data.content && result.data.content[0] && result.data.content[0].text) {
+        description = result.data.content[0].text.trim();
+      }
+
+      console.log('[Description Generation] Final description:', description);
 
       // Store the description
       setFavoritedOutputDescriptions(prev => ({
@@ -1346,7 +1354,8 @@ Keep it professional and suitable for a data analysis report.`;
       }));
 
     } catch (error) {
-      console.error('Error generating description:', error);
+      console.error('[Description Generation] Error generating description:', error);
+      console.error('[Description Generation] Error details:', error.message);
       // Use a fallback description
       setFavoritedOutputDescriptions(prev => ({
         ...prev,
@@ -2172,7 +2181,7 @@ Keep it professional and suitable for a data analysis report.`;
                 </div>
               ) : (
                 /* Report content */
-                <div className="max-w-4xl mx-auto">
+                <div className="mx-auto" style={{ width: '5in' }}>
                   {/* Dataset title */}
                   <h1 className="text-2xl font-semibold mb-3 text-[#5d5d66]">{reportTitle}</h1>
 
@@ -2208,7 +2217,7 @@ Keep it professional and suitable for a data analysis report.`;
 
                             {/* Plot output */}
                             {card.output.plots && card.output.plots.length > 0 && (
-                              <div className="mt-4">
+                              <div className="mt-4 flex flex-col items-center">
                                 {card.output.plots.map((plot, idx) => {
                                   // Handle different plot types
                                   if (plot.type === 'html') {
@@ -2230,7 +2239,7 @@ Keep it professional and suitable for a data analysis report.`;
                                         key={idx}
                                         src={`data:image/png;base64,${plot.pngBase64}`}
                                         alt={`Plot ${idx + 1}`}
-                                        className="max-w-full h-auto rounded-lg shadow-sm"
+                                        className="max-w-full h-auto rounded-lg shadow-sm mx-auto"
                                       />
                                     );
                                   } else if (plot.data) {
