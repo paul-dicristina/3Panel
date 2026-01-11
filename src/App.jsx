@@ -682,17 +682,17 @@ Please respond with a JSON object in this format:
           console.log('reportSections:', result.reportSections);
           console.log('filename:', result.filename);
 
-          // Extract report title and description from reportSections
-          if (result.reportSections && result.reportSections.subject) {
-            // Use first sentence from subject as title (max 10 words)
-            const subjectText = result.reportSections.subject;
-            const firstSentence = subjectText.split('.')[0] + '.';
-            const words = firstSentence.split(' ').slice(0, 10).join(' ');
-            setReportTitle(words);
-            setReportDescription(subjectText);
+          // Extract report title and description from response
+          if (result.reportTitle) {
+            setReportTitle(result.reportTitle);
           } else if (result.filename) {
             // Fallback: use filename
             setReportTitle(`Dataset: ${result.filename}`);
+          }
+
+          if (result.reportSections && result.reportSections.subject) {
+            setReportDescription(result.reportSections.subject);
+          } else {
             setReportDescription('');
           }
 
@@ -864,17 +864,17 @@ Please respond with a JSON object in this format:
           console.log(`Dataset registry updated for '${datasetName}':`, result.columnMetadata);
         }
 
-        // Extract report title and description from reportSections
-        if (result.reportSections && result.reportSections.subject) {
-          // Use first sentence from subject as title (max 10 words)
-          const subjectText = result.reportSections.subject;
-          const firstSentence = subjectText.split('.')[0] + '.';
-          const words = firstSentence.split(' ').slice(0, 10).join(' ');
-          setReportTitle(words);
-          setReportDescription(subjectText);
+        // Extract report title and description from response
+        if (result.reportTitle) {
+          setReportTitle(result.reportTitle);
         } else {
           // Fallback: use table name
           setReportTitle(`Dataset: ${fullTableName}`);
+        }
+
+        if (result.reportSections && result.reportSections.subject) {
+          setReportDescription(result.reportSections.subject);
+        } else {
           setReportDescription('');
         }
 
@@ -943,6 +943,12 @@ Please respond with a JSON object in this format:
     setCurrentOutput(null);
     setCurrentCode('');
     setInputValue('');
+
+    // Clear report state
+    setReportTitle('');
+    setReportDescription('');
+    setFavoritedCardIds(new Set());
+    setFavoritedOutputDescriptions({});
 
     // Clear R workspace
     try {
@@ -2168,11 +2174,11 @@ Keep it professional and suitable for a data analysis report.`;
                 /* Report content */
                 <div className="max-w-4xl mx-auto">
                   {/* Dataset title */}
-                  <h1 className="text-2xl font-bold mb-3 text-gray-900">{reportTitle}</h1>
+                  <h1 className="text-2xl font-semibold mb-3 text-[#5d5d66]">{reportTitle}</h1>
 
                   {/* Dataset description */}
                   {reportDescription && (
-                    <p className="text-base text-gray-700 mb-8 leading-relaxed">{reportDescription}</p>
+                    <p className="text-sm mb-8 leading-relaxed text-gray-700">{reportDescription}</p>
                   )}
 
                   {/* Favorited outputs */}
@@ -2186,7 +2192,7 @@ Keep it professional and suitable for a data analysis report.`;
                       <div key={cardId} className="mb-8 pb-8 border-b border-gray-200 last:border-b-0">
                         {/* Description paragraph */}
                         {description && (
-                          <p className="text-base text-gray-700 mb-4 leading-relaxed">{description}</p>
+                          <p className="text-sm text-gray-700 mb-4 leading-relaxed">{description}</p>
                         )}
 
                         {/* Output content */}
@@ -2203,14 +2209,42 @@ Keep it professional and suitable for a data analysis report.`;
                             {/* Plot output */}
                             {card.output.plots && card.output.plots.length > 0 && (
                               <div className="mt-4">
-                                {card.output.plots.map((plot, idx) => (
-                                  <img
-                                    key={idx}
-                                    src={plot}
-                                    alt={`Plot ${idx + 1}`}
-                                    className="max-w-full h-auto rounded-lg shadow-sm"
-                                  />
-                                ))}
+                                {card.output.plots.map((plot, idx) => {
+                                  // Handle different plot types
+                                  if (plot.type === 'html') {
+                                    // HTML widget (gt table, interactive chart, etc.)
+                                    return (
+                                      <iframe
+                                        key={idx}
+                                        src={plot.url ? `http://localhost:3001${plot.url}` : undefined}
+                                        srcDoc={plot.url ? undefined : plot.data}
+                                        style={{ width: '100%', height: '600px', border: 'none' }}
+                                        title={`HTML Widget ${idx + 1}`}
+                                        className="rounded-lg shadow-sm"
+                                      />
+                                    );
+                                  } else if (plot.pngBase64) {
+                                    // PNG image
+                                    return (
+                                      <img
+                                        key={idx}
+                                        src={`data:image/png;base64,${plot.pngBase64}`}
+                                        alt={`Plot ${idx + 1}`}
+                                        className="max-w-full h-auto rounded-lg shadow-sm"
+                                      />
+                                    );
+                                  } else if (plot.data) {
+                                    // SVG plot
+                                    return (
+                                      <div
+                                        key={idx}
+                                        className="max-w-full rounded-lg shadow-sm"
+                                        dangerouslySetInnerHTML={{ __html: plot.data }}
+                                      />
+                                    );
+                                  }
+                                  return null;
+                                })}
                               </div>
                             )}
 

@@ -2337,6 +2337,7 @@ Examples:
 ✗ WRONG: Making "species" interactive (that's a column name, not a value!)
 ✗ WRONG: Making "distributions" interactive (that's not a categorical value!)
 }` : `{
+  "title": "Concise descriptive title for the dataset (3-9 words)",
   "structure": "Text describing exact dimensions and time range if applicable",
   "tidyFormat": "Text describing whether dataset is tidy and what needs to be reshaped",
   "missingData": "Text describing missing data patterns and counts",
@@ -2371,6 +2372,14 @@ For each section:
 - Write 3-5 sentences in paragraph format
 - Be concise and specific
 - Base your report ENTIRELY on the R output shown below
+
+CRITICAL - Title Generation:
+- First, write the "subject" section describing what the dataset is about
+- Then, create a "title" field with a concise, descriptive title (3-9 words)
+- The title should capture the essence of what the subject describes
+- The title should be professional and suitable for a data analysis report
+- DO NOT include the title in the subject text - it's a separate field
+- Example: if subject is "This dataset contains historical life expectancy data...", title could be "Global Life Expectancy Trends"
 ${suggestionsEnabled ? `
 - For suggestions: provide 2-4 specific, actionable prompts for CHART/PLOT analysis only
 - ⚠️ CRITICAL: If data is NOT in tidy format, the FIRST suggestion MUST be a specific prompt to convert it to tidy format using pivot_longer(). This will be ENFORCED by server validation - if data is not tidy and first suggestion is not about conversion, ALL suggestions will be removed.
@@ -2485,6 +2494,7 @@ Write your comprehensive report in JSON format based on this actual output.`;
       const reportData = JSON.parse(jsonText);
 
       reportSections = {
+        title: reportData.title || '',
         structure: reportData.structure || '',
         tidyFormat: reportData.tidyFormat || '',
         missingData: reportData.missingData || '',
@@ -2492,6 +2502,8 @@ Write your comprehensive report in JSON format based on this actual output.`;
         insights: reportData.insights || ''
       };
       suggestions = reportData.suggestions || [];
+
+      console.log('[CSV] Report sections parsed, title:', reportSections.title);
 
       // Validate and auto-calculate positions for interactive suggestions
       if (suggestions && suggestions.length > 0) {
@@ -2678,10 +2690,16 @@ Write your comprehensive report in JSON format based on this actual output.`;
       filteredError = filtered.length > 0 ? filtered.join('\n') : null;
     }
 
+    // Extract title from reportSections and send separately
+    const reportTitle = reportSections.title || `Dataset: ${filename}`;
+    // Remove title from reportSections so it doesn't appear in the UI tabs
+    delete reportSections.title;
+
     // Return complete response
     res.json({
       success: true,
       reportSections: reportSections,
+      reportTitle: reportTitle,
       code: diagnosticCode,
       output: rOutput.stdout,
       error: filteredError,
@@ -2955,6 +2973,7 @@ Examples:
 ✗ WRONG: Making "species" interactive (that's a column name, not a value!)
 ✗ WRONG: Making "distributions" interactive (that's not a categorical value!)
 }` : `{
+  "title": "Concise descriptive title for the dataset (3-9 words)",
   "structure": "Text describing exact dimensions and time range if applicable",
   "tidyFormat": "Text describing whether dataset is tidy and what needs to be reshaped",
   "missingData": "Text describing missing data patterns and counts",
@@ -2989,6 +3008,14 @@ For each section:
 - Write 3-5 sentences in paragraph format
 - Be concise and specific
 - Base your report ENTIRELY on the R output shown below
+
+CRITICAL - Title Generation:
+- First, write the "subject" section describing what the dataset is about
+- Then, create a "title" field with a concise, descriptive title (3-9 words)
+- The title should capture the essence of what the subject describes
+- The title should be professional and suitable for a data analysis report
+- DO NOT include the title in the subject text - it's a separate field
+- Example: if subject is "This dataset contains historical life expectancy data...", title could be "Global Life Expectancy Trends"
 ${suggestionsEnabled ? `
 - For suggestions: provide 2-4 specific, actionable prompts for CHART/PLOT analysis only
 - ⚠️ CRITICAL: If data is NOT in tidy format, the FIRST suggestion MUST be a specific prompt to convert it to tidy format using pivot_longer(). This will be ENFORCED by server validation - if data is not tidy and first suggestion is not about conversion, ALL suggestions will be removed.
@@ -3107,6 +3134,7 @@ Write your comprehensive report in JSON format based on this actual output.`;
       console.log('Successfully parsed JSON, keys:', Object.keys(reportData));
 
       reportSections = {
+        title: reportData.title || '',
         structure: reportData.structure || '',
         tidyFormat: reportData.tidyFormat || '',
         missingData: reportData.missingData || '',
@@ -3114,6 +3142,8 @@ Write your comprehensive report in JSON format based on this actual output.`;
         insights: reportData.insights || ''
       };
       suggestions = reportData.suggestions || [];
+
+      console.log('[SNOWFLAKE] Report sections parsed, title:', reportSections.title);
 
       // Validate and auto-calculate positions for interactive suggestions
       if (suggestions && suggestions.length > 0) {
@@ -3306,10 +3336,16 @@ Write your comprehensive report in JSON format based on this actual output.`;
       filteredError = filtered.length > 0 ? filtered.join('\n') : null;
     }
 
+    // Extract title from reportSections and send separately
+    const reportTitle = reportSections.title || `Dataset: ${database}.${schema}.${tableName}`;
+    // Remove title from reportSections so it doesn't appear in the UI tabs
+    delete reportSections.title;
+
     // Return complete response
     res.json({
       success: true,
       reportSections: reportSections,
+      reportTitle: reportTitle,
       code: diagnosticCode,
       output: rOutput.stdout,
       error: filteredError,
