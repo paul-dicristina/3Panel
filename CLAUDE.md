@@ -11,7 +11,8 @@ This document describes how 3Panel's interactive suggestions and automatic datas
 5. [Dataset Naming Convention](#dataset-naming-convention)
 6. [Automatic Dataset Tracking](#automatic-dataset-tracking)
 7. [Metadata Flow](#metadata-flow)
-8. [Troubleshooting](#troubleshooting)
+8. [Conversation Persistence](#conversation-persistence)
+9. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -692,6 +693,391 @@ When modifying the interactive suggestions system:
 
 ---
 
+## Conversation Persistence
+
+**Status:** Fully Implemented (2026-01-12)
+
+3Panel now automatically saves and restores your conversation state across page reloads until you explicitly click "New Conversation".
+
+### What Gets Persisted
+
+**Conversation Data:**
+- All messages (user and assistant)
+- All code cards with outputs (plots, tables, text)
+- Selected code card
+
+**Report Data:**
+- Report title and description
+- Favorited card IDs
+- Favorited output descriptions
+
+**Dataset State:**
+- Dataset registry (all loaded datasets with metadata)
+- Active dataset name
+- Column metadata for each dataset
+
+**UI State:**
+- View mode (Explore or Report)
+- Expanded suggestions
+
+### Storage Mechanism
+
+**localStorage Key:** `3panel_conversation_state`
+
+**Storage Structure:**
+```javascript
+{
+  version: "1.0",
+  timestamp: 1704067200000,
+  state: {
+    messages: [...],
+    codeCards: [...],
+    reportTitle: "...",
+    reportDescription: "...",
+    favoritedCardIds: [...],
+    favoritedOutputDescriptions: {...},
+    datasetRegistry: {...},
+    viewMode: "explore",
+    selectedCardId: "card-123",
+    expandedSuggestions: [...]
+  }
+}
+```
+
+### How It Works
+
+#### 1. Auto-Save on State Changes
+
+Saves are **debounced** (2 seconds) to avoid excessive writes:
+
+**Triggers:**
+- Message sent
+- Code executed
+- Card favorited/unfavorited
+- Dataset loaded
+- View mode changed
+- Selected card changed
+
+**Optimization:**
+- Uses hash-based change detection to skip redundant saves
+- Only saves if state actually changed
+
+#### 2. Immediate Save on Page Unload
+
+When you close the tab or refresh the page:
+- `beforeunload` event triggers immediate save
+- No debounce, ensures all changes are captured
+
+#### 3. Auto-Restore on Page Load
+
+When you open 3Panel:
+- Checks localStorage for saved state
+- If found, restores all state silently
+- No prompt or confirmation needed
+
+#### 4. Clear on "New Conversation"
+
+Clicking "New Conversation" button:
+- Clears all in-memory state
+- Deletes localStorage entry
+- Clears R workspace (backend)
+- Next reload starts fresh
+
+### Large Data Handling
+
+**Problem:** Base64 PNG images can be 100-500KB each, quickly exceeding localStorage limits (5-10MB).
+
+**Solution:** Smart size optimization
+
+1. **Check size before saving:**
+   - If serialized state > 4MB, strip PNG data from plots
+   - Keep SVG data (much smaller, ~10-30KB)
+   - Plots still render correctly via SVG
+
+2. **If still too large:**
+   - Show `StorageWarningModal` with options:
+     - "Clear conversation" - start fresh
+     - "Continue without saving" - work without persistence
+
+3. **Console logging:**
+   - `[PERSIST] Preparing to save state (2.3 MB)` - normal save
+   - `[PERSIST] Size exceeds 4.00 MB, optimizing...` - PNG stripping activated
+   - `[PERSIST] Optimized size: 1.8 MB` - after optimization
+
+### R Workspace Restoration Challenge
+
+**The Problem:**
+- localStorage persists across page reloads
+- R backend process resets on server restart
+- Dataset registry shows "lex_tidy" but R doesn't have it
+
+**User Experience:**
+```
+User reloads page →
+Sees conversation history ✓ →
+Dataset registry shows "lex_tidy" ✓ →
+Try to run code using "lex_tidy" →
+Error: "object 'lex_tidy' not found" ✗
+```
+
+**Solution:** Warning banner with manual reload
+
+When conversation is restored with datasets:
+1. `DatasetRestorationBanner` appears at top of chat panel
+2. Lists all datasets that need reloading:
+   - Base datasets: "lex.csv (upload CSV file)"
+   - Tidy datasets: "lex_tidy (transformation - reload lex.csv first)"
+3. User manually re-uploads CSVs or reconnects to Snowflake
+4. System detects matching dataset names and merges metadata
+5. User can dismiss banner once datasets are reloaded
+
+### UI Components
+
+#### StorageWarningModal
+
+**Purpose:** Shown when localStorage quota is exceeded
+
+**Location:** [src/components/StorageWarningModal.jsx](src/components/StorageWarningModal.jsx)
+
+**Triggered by:** `QuotaExceededError` during save attempt
+
+**Options:**
+- "Clear Conversation" - Clears all state and localStorage
+- "Continue Without Saving" - Dismisses modal, app continues working without persistence
+
+#### DatasetRestorationBanner
+
+**Purpose:** Warns that datasets need manual reload after page restore
+
+**Location:** [src/components/DatasetRestorationBanner.jsx](src/components/DatasetRestorationBanner.jsx)
+
+**Shown when:** Conversation restored with datasets in registry
+
+**Features:**
+- Lists base datasets (CSV/Snowflake)
+- Lists tidy transformations (need base dataset first)
+- "Dismiss" button to hide banner
+- Sticky position at top of chat panel
+
+### Implementation Details
+
+#### Core Functions (App.jsx)
+
+**saveConversationState()** ([App.jsx:110-154](src/App.jsx#L110-L154))
+- Builds state object with Set → Array serialization
+- Checks size, strips PNGs if needed
+- Saves to localStorage
+- Handles QuotaExceededError
+
+**loadConversationState()** ([App.jsx:204-258](src/App.jsx#L204-L258))
+- Loads from localStorage on mount
+- Validates structure and contents
+- Converts Arrays → Sets
+- Restores all state with safe defaults
+- Shows dataset warning if datasets exist
+
+**clearConversationState()** ([App.jsx:263-270](src/App.jsx#L263-L270))
+- Removes from localStorage
+- Called by "New Conversation" button
+
+**debouncedSave()** ([App.jsx:167-198](src/App.jsx#L167-L198))
+- 2 second debounce
+- Hash-based change detection
+- Skips save if state unchanged
+
+#### Persistence Hooks (App.jsx:539-580)
+
+**Debounced save on state changes:**
+```javascript
+useEffect(() => {
+  debouncedSave();
+}, [messages, codeCards, reportTitle, reportDescription, ...]);
+```
+
+**Immediate save on beforeunload:**
+```javascript
+useEffect(() => {
+  const handleBeforeUnload = () => {
+    saveConversationStateImmediate();
+  };
+  window.addEventListener('beforeunload', handleBeforeUnload);
+  return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+}, [...]);
+```
+
+#### Utility Functions (utils/persistence.js)
+
+**File:** [src/utils/persistence.js](src/utils/persistence.js)
+
+Key utilities:
+- `getStorageSize(data)` - Calculate serialized size in bytes
+- `formatBytes(bytes)` - Human-readable size strings
+- `optimizeCodeCards(codeCards)` - Strip PNG data to reduce size
+- `hashObject(obj)` - Generate hash for change detection
+- `serializeState(state)` - Convert Sets → Arrays
+- `deserializeState(state)` - Convert Arrays → Sets
+- `validateState(state)` - Validate structure before restore
+
+### Configuration
+
+**Constants** (persistence.js:8-14):
+```javascript
+PERSISTENCE_CONFIG = {
+  STORAGE_KEY: '3panel_conversation_state',
+  VERSION: '1.0',
+  SAVE_DEBOUNCE_MS: 2000,           // 2 seconds
+  MAX_SIZE_BYTES: 4 * 1024 * 1024,  // 4MB
+  STORAGE_LIMIT_ESTIMATE: 5 * 1024 * 1024  // 5MB
+}
+```
+
+### What Does NOT Get Persisted
+
+**Transient UI State:**
+- `isLoading`, `isSubmitAnimating`, `isRecording`
+- Modal visibility states (`showApiKeyModal`, `showSnowflakeModal`)
+- `inputValue` (half-typed message)
+
+**Already Persisted Separately:**
+- `apiKey` - stored in 'anthropic_api_key'
+- `autoFormatTabular` - stored in 'auto_format_tabular'
+
+**Backend State:**
+- R workspace (live process, doesn't persist)
+- Server session data
+
+**Panel Sizes:**
+- Split.js panel dimensions (intentional - avoids view switching issues)
+
+### Avoiding Historical "View Switching Issues"
+
+Previous implementation (removed in earlier commits) caused view switching problems. Prevention strategies:
+
+1. **Don't persist panel sizes** - Let Split.js initialize naturally on each load
+2. **Debounced saves** - Prevent race conditions during rapid state changes
+3. **Hash-based change detection** - Prevent infinite save loops
+4. **No side effects in persistence functions** - Just save/restore data, don't trigger actions
+
+### Console Logging
+
+Enable detailed logging by checking browser console:
+
+**Normal operation:**
+```
+[PERSIST] Preparing to save state (1.2 MB)
+[PERSIST] ✓ State saved successfully
+[PERSIST] Loading state from 1/12/2026, 3:45:00 PM
+[PERSIST] ✓ State loaded successfully
+```
+
+**Size optimization:**
+```
+[PERSIST] Preparing to save state (5.8 MB)
+[PERSIST] Size exceeds 4.00 MB, optimizing...
+[PERSIST] Stripped PNG data to reduce size
+[PERSIST] Optimized size: 2.1 MB
+[PERSIST] ✓ State saved successfully
+```
+
+**Errors:**
+```
+[PERSIST] Storage quota exceeded
+[PERSIST] Error loading state: SyntaxError: Unexpected token
+[PERSIST] Invalid state format, clearing
+```
+
+### Troubleshooting
+
+#### Issue: Conversation not persisting
+
+**Check:**
+1. Browser console for `[PERSIST]` log messages
+2. DevTools → Application → Local Storage → verify `3panel_conversation_state` exists
+3. Check for QuotaExceededError in console
+
+**Common causes:**
+- localStorage disabled in browser
+- Private/incognito mode (some browsers limit storage)
+- Storage quota exceeded (see warning modal)
+
+#### Issue: Datasets don't work after reload
+
+**Expected behavior** - This is normal!
+
+R workspace doesn't persist across page reloads. You must:
+1. Look for yellow `DatasetRestorationBanner` at top of chat
+2. Re-upload CSV files or reconnect to Snowflake
+3. For tidy datasets, re-run transformation code
+
+**Why we don't auto-reload:**
+- CSV files may have moved
+- Snowflake credentials may have changed
+- Simpler and more reliable to let user control it
+
+#### Issue: "Storage quota exceeded" modal keeps appearing
+
+**Causes:**
+- Very long conversation (100+ messages)
+- Many large plots (10+ PNG images)
+- Browser has low localStorage limit (some mobile browsers)
+
+**Solutions:**
+1. Click "Clear Conversation" to start fresh
+2. Generate fewer plots (code-only analysis)
+3. Use "Continue Without Saving" if you don't need persistence
+
+#### Issue: State loads but some data is missing
+
+**Check:**
+- Console for validation warnings
+- May indicate corrupted data or old version
+
+**Fix:**
+- Click "New Conversation" to clear
+- Will start fresh next time
+
+### Testing
+
+**Manual test checklist:**
+
+1. ✅ **Basic save/restore:**
+   - Load CSV, send messages, execute code
+   - Reload page → verify conversation restored
+
+2. ✅ **Large data:**
+   - Generate 10+ plots
+   - Reload page → verify plots display (SVG)
+   - Check console for PNG stripping warning
+
+3. ✅ **Dataset restoration:**
+   - Load CSV, transform to tidy
+   - Reload page → verify yellow banner appears
+   - Re-upload CSV → verify can execute code
+
+4. ✅ **New conversation:**
+   - Have active conversation
+   - Click "New Conversation"
+   - Reload page → verify fresh start
+
+5. ✅ **Mode switching:**
+   - Work in Explore mode
+   - Switch to Report mode
+   - Reload page → verify Report mode persists
+
+### Future Enhancements
+
+Potential improvements (out of scope for v1):
+
+1. **Multiple conversation slots** - Save/load named conversations
+2. **Cloud sync** - Sync across devices (requires backend)
+3. **Export/import** - Download conversation as JSON file
+4. **Automatic dataset re-loading** - Store file paths and reload automatically
+5. **Compression** - Use LZ-string for better storage efficiency
+6. **IndexedDB migration** - Larger storage limit (25MB+)
+7. **Selective persistence** - Let user choose what to save
+
+---
+
 ## File Reference
 
 ### Key Files
@@ -699,9 +1085,12 @@ When modifying the interactive suggestions system:
 | File | Purpose | Lines |
 |------|---------|-------|
 | `server.js` | Backend logic for suggestions & dataset tracking | 79-3180 |
-| `src/App.jsx` | Frontend dataset registry & code execution | 52-1350 |
+| `src/App.jsx` | Frontend dataset registry, code execution & persistence | 52-2575 |
 | `src/components/InteractiveSuggestion.jsx` | Interactive UI component | 1-416 |
+| `src/components/StorageWarningModal.jsx` | Storage quota exceeded modal | 1-68 |
+| `src/components/DatasetRestorationBanner.jsx` | Dataset reload warning banner | 1-67 |
 | `src/utils/claudeApi.js` | API communication with active dataset | 20-35 |
+| `src/utils/persistence.js` | Conversation persistence utilities | 1-171 |
 | `src/index.css` | Styles for interactive elements | 240-420 |
 
 ### Important Functions
@@ -714,6 +1103,9 @@ When modifying the interactive suggestions system:
 - `handleSendMessage()` - Sends messages with active dataset
 - `executeRCode()` - Executes R code and updates registry
 - `InteractiveSuggestion` - Renders interactive suggestion UI
+- `saveConversationState()` - Saves state to localStorage with size optimization
+- `loadConversationState()` - Restores state from localStorage on mount
+- `clearConversationState()` - Clears persisted state
 
 ---
 
@@ -731,4 +1123,4 @@ Potential improvements to consider:
 
 ---
 
-Last updated: 2026-01-05
+Last updated: 2026-01-12

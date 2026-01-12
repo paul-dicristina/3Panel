@@ -8,10 +8,23 @@ import ApiKeyModal from './components/ApiKeyModal';
 import CodeCard from './components/CodeCard';
 import DatasetReport from './components/DatasetReport';
 import SnowflakeBrowserModal from './components/SnowflakeBrowserModal';
+import StorageWarningModal from './components/StorageWarningModal';
+import DatasetRestorationBanner from './components/DatasetRestorationBanner';
 import InteractiveSuggestion from './components/InteractiveSuggestion';
 import ReactiveComponent from './components/ReactiveComponent';
 import { sendMessageToClaude } from './utils/claudeApi';
 import { executeRCode } from './utils/rExecutor';
+import {
+  PERSISTENCE_CONFIG,
+  getStorageSize,
+  formatBytes,
+  optimizeCodeCards,
+  hashObject,
+  serializeState,
+  deserializeState,
+  validateState,
+  getDefaultState
+} from './utils/persistence';
 
 // Register R language for syntax highlighting
 SyntaxHighlighter.registerLanguage('r', r);
@@ -68,6 +81,8 @@ function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [showSnowflakeModal, setShowSnowflakeModal] = useState(false);
+  const [showStorageWarning, setShowStorageWarning] = useState(false);
+  const [showDatasetWarning, setShowDatasetWarning] = useState(false);
 
   // Refs for resizable panels
   const splitInstanceRef = useRef(null);
@@ -85,6 +100,178 @@ function App() {
   const shouldAutoSubmitRef = useRef(false);
   const isButtonPressedRef = useRef(false);
   const slashMenuRef = useRef(null);
+  const saveTimeoutRef = useRef(null);
+  const lastSavedHashRef = useRef(null);
+
+  // ==================== PERSISTENCE FUNCTIONS ====================
+
+  /**
+   * Save conversation state to localStorage
+   * Handles size optimization by stripping PNG data if needed
+   */
+  const saveConversationState = () => {
+    try {
+      // Build state object with serialization (Set -> Array)
+      const stateToSave = {
+        version: PERSISTENCE_CONFIG.VERSION,
+        timestamp: Date.now(),
+        state: serializeState({
+          messages,
+          codeCards,
+          reportTitle,
+          reportDescription,
+          favoritedCardIds,
+          favoritedOutputDescriptions,
+          datasetRegistry,
+          viewMode,
+          selectedCardId,
+          expandedSuggestions
+        })
+      };
+
+      // Check size before saving
+      let size = getStorageSize(stateToSave);
+      console.log(`[PERSIST] Preparing to save state (${formatBytes(size)})`);
+
+      // If size exceeds threshold, optimize by stripping PNG data
+      if (size > PERSISTENCE_CONFIG.MAX_SIZE_BYTES) {
+        console.warn(`[PERSIST] Size exceeds ${formatBytes(PERSISTENCE_CONFIG.MAX_SIZE_BYTES)}, optimizing...`);
+        stateToSave.state.codeCards = optimizeCodeCards(stateToSave.state.codeCards);
+        size = getStorageSize(stateToSave);
+        console.log(`[PERSIST] Optimized size: ${formatBytes(size)}`);
+      }
+
+      // Save to localStorage
+      localStorage.setItem(PERSISTENCE_CONFIG.STORAGE_KEY, JSON.stringify(stateToSave));
+      console.log(`[PERSIST] ✓ State saved successfully`);
+
+    } catch (error) {
+      if (error.name === 'QuotaExceededError') {
+        console.error('[PERSIST] Storage quota exceeded');
+        setShowStorageWarning(true);
+      } else {
+        console.error('[PERSIST] Error saving state:', error);
+      }
+    }
+  };
+
+  /**
+   * Save conversation state immediately (no debounce)
+   * Used for beforeunload handler
+   */
+  const saveConversationStateImmediate = () => {
+    saveConversationState();
+  };
+
+  /**
+   * Debounced save - only saves if state has changed
+   */
+  const debouncedSave = () => {
+    // Build a lightweight version for hashing
+    const currentState = {
+      messages,
+      codeCards: codeCards.map(c => ({ id: c.id, code: c.code })), // Just ID and code for hash
+      reportTitle,
+      reportDescription,
+      favoritedCardIds: Array.from(favoritedCardIds),
+      favoritedOutputDescriptions,
+      datasetRegistry,
+      viewMode,
+      selectedCardId
+    };
+
+    const currentHash = hashObject(currentState);
+
+    // Skip if state hasn't changed
+    if (currentHash === lastSavedHashRef.current) {
+      return;
+    }
+
+    // Clear existing timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    // Set new timeout
+    saveTimeoutRef.current = setTimeout(() => {
+      saveConversationState();
+      lastSavedHashRef.current = currentHash;
+    }, PERSISTENCE_CONFIG.SAVE_DEBOUNCE_MS);
+  };
+
+  /**
+   * Load conversation state from localStorage
+   * Returns true if state was loaded successfully
+   */
+  const loadConversationState = () => {
+    try {
+      const saved = localStorage.getItem(PERSISTENCE_CONFIG.STORAGE_KEY);
+      if (!saved) {
+        console.log('[PERSIST] No saved state found');
+        return false;
+      }
+
+      const parsed = JSON.parse(saved);
+
+      // Validate structure
+      if (!parsed.version || !parsed.state) {
+        console.warn('[PERSIST] Invalid state format, clearing');
+        clearConversationState();
+        return false;
+      }
+
+      // Validate state contents
+      if (!validateState(parsed.state)) {
+        console.warn('[PERSIST] Invalid state structure, clearing');
+        clearConversationState();
+        return false;
+      }
+
+      const state = deserializeState(parsed.state);
+      const savedDate = new Date(parsed.timestamp).toLocaleString();
+      console.log(`[PERSIST] Loading state from ${savedDate}`);
+
+      // Restore all state with safe defaults
+      setMessages(Array.isArray(state.messages) ? state.messages : []);
+      setCodeCards(Array.isArray(state.codeCards) ? state.codeCards : []);
+      setReportTitle(typeof state.reportTitle === 'string' ? state.reportTitle : '');
+      setReportDescription(typeof state.reportDescription === 'string' ? state.reportDescription : '');
+      setFavoritedCardIds(state.favoritedCardIds instanceof Set ? state.favoritedCardIds : new Set());
+      setFavoritedOutputDescriptions(typeof state.favoritedOutputDescriptions === 'object' ? state.favoritedOutputDescriptions : {});
+      setDatasetRegistry(typeof state.datasetRegistry === 'object' ? state.datasetRegistry : { activeDataset: null, datasets: {} });
+      setViewMode(typeof state.viewMode === 'string' ? state.viewMode : 'explore');
+      setSelectedCardId(state.selectedCardId || null);
+      setExpandedSuggestions(state.expandedSuggestions instanceof Set ? state.expandedSuggestions : new Set());
+
+      // Show dataset restoration warning if datasets exist
+      if (state.datasetRegistry?.datasets && Object.keys(state.datasetRegistry.datasets).length > 0) {
+        console.log('[PERSIST] Datasets found in saved state, showing restoration warning');
+        setShowDatasetWarning(true);
+      }
+
+      console.log('[PERSIST] ✓ State loaded successfully');
+      return true;
+
+    } catch (error) {
+      console.error('[PERSIST] Error loading state:', error);
+      clearConversationState();
+      return false;
+    }
+  };
+
+  /**
+   * Clear persisted conversation state from localStorage
+   */
+  const clearConversationState = () => {
+    try {
+      localStorage.removeItem(PERSISTENCE_CONFIG.STORAGE_KEY);
+      console.log('[PERSIST] State cleared from localStorage');
+    } catch (error) {
+      console.error('[PERSIST] Error clearing state:', error);
+    }
+  };
+
+  // ==================== END PERSISTENCE FUNCTIONS ====================
 
   // Helper function to determine suggestion icon based on content
   const getSuggestionIcon = (suggestion) => {
@@ -138,6 +325,12 @@ function App() {
     const storedAutoFormat = localStorage.getItem('auto_format_tabular');
     if (storedAutoFormat !== null) {
       setAutoFormatTabular(storedAutoFormat === 'true');
+    }
+
+    // Load conversation state
+    const loaded = loadConversationState();
+    if (loaded) {
+      console.log('[PERSIST] Previous conversation restored');
     }
   }, []);
 
@@ -344,6 +537,50 @@ function App() {
   //     fetchDataFrames();
   //   }
   // }, [viewMode]);
+
+  // ==================== PERSISTENCE HOOKS ====================
+
+  // Debounced save on state changes
+  useEffect(() => {
+    debouncedSave();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    messages,
+    codeCards,
+    reportTitle,
+    reportDescription,
+    favoritedCardIds,
+    favoritedOutputDescriptions,
+    datasetRegistry,
+    viewMode,
+    selectedCardId
+  ]);
+
+  // Immediate save on beforeunload
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      saveConversationStateImmediate();
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    messages,
+    codeCards,
+    reportTitle,
+    reportDescription,
+    favoritedCardIds,
+    favoritedOutputDescriptions,
+    datasetRegistry,
+    viewMode,
+    selectedCardId,
+    expandedSuggestions
+  ]);
+
+  // ==================== END PERSISTENCE HOOKS ====================
 
   // Handle API key save
   const handleSaveApiKey = (key) => {
@@ -950,6 +1187,9 @@ Please respond with a JSON object in this format:
     setFavoritedCardIds(new Set());
     setFavoritedOutputDescriptions({});
 
+    // Clear persisted state from localStorage
+    clearConversationState();
+
     // Clear R workspace
     try {
       await fetch('/api/clear-workspace', {
@@ -962,6 +1202,20 @@ Please respond with a JSON object in this format:
     } catch (error) {
       console.error('Error clearing workspace:', error);
     }
+  };
+
+  // Handle storage warning modal actions
+  const handleClearStorageAndContinue = async () => {
+    setShowStorageWarning(false);
+    await handleNewConversation();
+  };
+
+  const handleDismissStorageWarning = () => {
+    setShowStorageWarning(false);
+  };
+
+  const handleDismissDatasetWarning = () => {
+    setShowDatasetWarning(false);
   };
 
   // Toggle conversations menu
@@ -1751,7 +2005,7 @@ Keep it professional and suitable for a data analysis report.`;
   return (
     <div className="h-screen flex flex-col bg-gray-100">
       {/* Header */}
-      <header className="bg-[#edeff0] h-[26px] relative">
+      <header className="bg-[#edeff0] h-[30px] relative">
         <div className="flex items-center justify-between h-full px-3">
           {/* Mode selector control */}
           <div className="absolute left-1/2 transform -translate-x-1/2 flex items-center h-full">
@@ -1965,6 +2219,12 @@ Keep it professional and suitable for a data analysis report.`;
       <div key="explore-mode" className="flex-1 flex overflow-hidden">
           {/* Left Panel - Interaction Panel */}
           <div id="left-panel" ref={leftPanelRef} tabIndex={0} className="flex flex-col bg-white focus:outline-none rounded-[10px]">
+          {/* Dataset Restoration Banner - shown when conversation is restored with datasets */}
+          <DatasetRestorationBanner
+            isVisible={showDatasetWarning}
+            datasetRegistry={datasetRegistry}
+            onDismiss={handleDismissDatasetWarning}
+          />
           {/* Messages area */}
           <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4">
             {messages.length === 0 && (
@@ -2181,7 +2441,7 @@ Keep it professional and suitable for a data analysis report.`;
                 </div>
               ) : (
                 /* Report content */
-                <div className="mx-auto" style={{ width: '5in' }}>
+                <div className="mx-auto" style={{ width: '6in' }}>
                   {/* Dataset title */}
                   <h1 className="text-2xl font-semibold mb-3 text-[#5d5d66]">{reportTitle}</h1>
 
@@ -2300,6 +2560,13 @@ Keep it professional and suitable for a data analysis report.`;
         isOpen={showSnowflakeModal}
         onClose={() => setShowSnowflakeModal(false)}
         onLoad={handleLoadSnowflakeTables}
+      />
+
+      {/* Storage Warning Modal */}
+      <StorageWarningModal
+        isOpen={showStorageWarning}
+        onClearAndContinue={handleClearStorageAndContinue}
+        onDismiss={handleDismissStorageWarning}
       />
     </div>
   );
