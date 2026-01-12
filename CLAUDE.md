@@ -123,6 +123,15 @@ The report panel shows **dynamic, live-updating content** based on the current s
   - `favoritedOutputDescriptions` cleared (empty object)
   - Report reverts to "Empty Report" state
 
+**Export Report:**
+- **Export Report** toolbar button creates an HTML report from favorited outputs
+- Button is **disabled** when no outputs are favorited (`favoritedCardIds.size === 0`)
+- Tooltip when disabled: "Add outputs to favorites to export report"
+- Tooltip when enabled: "Export report from conversation"
+- Visual disabled state: opacity-50, cursor-not-allowed
+- Opens exported report in new window
+- Implementation: `handleCreateReport()` function in App.jsx
+
 **Future Enhancements:**
 - Add export capabilities (PDF, DOCX, etc.)
 - Allow manual editing of descriptions
@@ -243,26 +252,41 @@ This wraps the handler in an arrow function, preventing the event from being pas
 
 **Commit:** 961cb37 "Prompt fixed - no conversation"
 
-### Conversation Storage Removed
+### UI Changes
 
-**Important:** This codebase does NOT include conversation persistence/localStorage features.
+#### Update API Key (2026-01-12)
 
-**Why:** The "manual prompt bug fixed" commit (e15c227) added 639 lines including conversation storage features. These were removed because:
-1. Only the manual prompt fix was needed
-2. Conversation storage was causing view switching issues
-3. Simpler single-session approach preferred
+**Change:** Moved "Update API Key" from toolbar button to options menu
 
-**What was removed:**
-- Conversation list menu
-- localStorage persistence
-- Conversation switching
-- Auto-save functionality
-- Conversation metadata tracking
+**Before:**
+- Toolbar had a button: "Update API Key"
+- Located on right side of toolbar next to other action buttons
 
-**Current state:**
-- Single conversation session only
-- No persistence across page reloads
-- Clean, simple user experience
+**After:**
+- Removed toolbar button
+- Added "Update API Key..." as **first item** in options menu (gear icon ⚙️)
+- Separator added below it
+- Clicking menu item opens the API key modal
+
+**Location:** Options menu in toolbar (lines 2113-2127 in App.jsx)
+
+**Rationale:** Cleaner toolbar, infrequent action moved to menu
+
+#### Export Report Button (2026-01-12)
+
+**Change:** Renamed "New Report" to "Export Report" and added smart disable logic
+
+**Button behavior:**
+- **Label:** "Export Report" (was "New Report")
+- **Disabled when:** No outputs are favorited (`favoritedCardIds.size === 0`)
+- **Enabled when:** At least one output is favorited (starred ⭐)
+- **Visual state:** Grayed out when disabled (opacity-50, cursor-not-allowed)
+- **Tooltip (disabled):** "Add outputs to favorites to export report"
+- **Tooltip (enabled):** "Export report from conversation"
+
+**Location:** Toolbar, between mode selector and favorite button
+
+**Rationale:** Button name clarifies it exports existing favorited content; disable state prevents confusion when report is empty
 
 ---
 
@@ -896,25 +920,24 @@ On shutdown (Ctrl+C):
 
 #### DatasetRestorationBanner
 
-**Purpose:** Warns that datasets need manual reload after page restore
+**Purpose:** ~~Warns that datasets need manual reload after page restore~~
 
-**Status:** ⚠️ Mostly unnecessary with R workspace persistence (but kept as safety net)
+**Status:** ❌ **Disabled** - No longer needed with R workspace persistence
 
 **Location:** [src/components/DatasetRestorationBanner.jsx](src/components/DatasetRestorationBanner.jsx)
 
-**Shown when:** Conversation restored with datasets in registry
+**Why it's disabled:**
+- R workspace persistence automatically restores all datasets on server startup
+- Datasets ARE actually available in R after page reload
+- Showing the warning would be misleading and confusing
+- Code in `loadConversationState()` is commented out (lines 247-250)
 
-**Why it still shows:**
-- Banner appears whenever datasets exist in localStorage
-- Doesn't check if R workspace actually has them
-- With workspace persistence, datasets ARE there, so banner is a false alarm
-- Users can safely dismiss it immediately
+**Component still exists for:**
+- Backward compatibility
+- Potential future use if workspace persistence fails
+- Can be re-enabled by uncommenting lines 247-250 in App.jsx
 
-**Future improvement:**
-- Add backend check to see if datasets exist in R before showing banner
-- OR remove banner entirely since workspace persistence makes it unnecessary
-
-**Features:**
+**Features (when enabled):**
 - Lists base datasets (CSV/Snowflake)
 - Lists tidy transformations (need base dataset first)
 - "Dismiss" button to hide banner
@@ -1110,15 +1133,11 @@ R workspace doesn't persist across page reloads. You must:
    - Reload page → verify plots display (SVG)
    - Check console for PNG stripping warning
 
-3. ✅ **Dataset restoration (deprecated with R workspace persistence):**
-   - Load CSV, transform to tidy
-   - Reload page → verify banner appears (false alarm)
-   - Dismiss banner → datasets work without reload
-
-3b. ✅ **R workspace persistence:**
+3. ✅ **R workspace persistence:**
    - Load CSV, create variables, transform to tidy
    - Stop server (Ctrl+C) → verify "Saving workspace" message
    - Restart server → verify "Restoring workspace" message
+   - Reload page → verify NO banner appears (banner is disabled)
    - Run code using datasets → verify they exist without reload
 
 4. ✅ **New conversation:**

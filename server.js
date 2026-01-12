@@ -1356,6 +1356,12 @@ WHEN NOT TO USE:
       });
     }
 
+    if (error.status === 529) {
+      return res.status(529).json({
+        error: 'Claude API is currently overloaded. Please wait a moment and try again.'
+      });
+    }
+
     res.status(500).json({
       error: error.message || 'An error occurred while processing your request'
     });

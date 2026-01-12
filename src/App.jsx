@@ -243,11 +243,12 @@ function App() {
       setSelectedCardId(state.selectedCardId || null);
       setExpandedSuggestions(state.expandedSuggestions instanceof Set ? state.expandedSuggestions : new Set());
 
-      // Show dataset restoration warning if datasets exist
-      if (state.datasetRegistry?.datasets && Object.keys(state.datasetRegistry.datasets).length > 0) {
-        console.log('[PERSIST] Datasets found in saved state, showing restoration warning');
-        setShowDatasetWarning(true);
-      }
+      // NOTE: Dataset restoration warning disabled - R workspace persistence handles this automatically
+      // Datasets are restored from .r-workspace.RData on server startup, so no manual reload needed
+      // if (state.datasetRegistry?.datasets && Object.keys(state.datasetRegistry.datasets).length > 0) {
+      //   console.log('[PERSIST] Datasets found in saved state, showing restoration warning');
+      //   setShowDatasetWarning(true);
+      // }
 
       console.log('[PERSIST] ✓ State loaded successfully');
       return true;
@@ -2116,6 +2117,16 @@ Keep it professional and suitable for a data analysis report.`;
                     className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
                     onClick={() => {
                       setShowOptionsMenu(false);
+                      setShowApiKeyModal(true);
+                    }}
+                  >
+                    Update API Key...
+                  </button>
+                  <div className="border-t border-gray-300 my-1"></div>
+                  <button
+                    className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
+                    onClick={() => {
+                      setShowOptionsMenu(false);
                       // TODO: Implement export conversation
                     }}
                   >
@@ -2170,12 +2181,12 @@ Keep it professional and suitable for a data analysis report.`;
             {/* Output panel toolbar icons */}
             <button
               onClick={handleCreateReport}
-              className="flex items-center gap-1 hover:bg-gray-200 rounded transition-colors px-1"
-              disabled={messages.length === 0}
-              title="Create new report from conversation"
+              className="flex items-center gap-1 hover:bg-gray-200 rounded transition-colors px-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={favoritedCardIds.size === 0}
+              title={favoritedCardIds.size === 0 ? "Add outputs to favorites to export report" : "Export report from conversation"}
             >
-              <img src="/report.png" alt="New Report" className="h-4" />
-              <span className="text-[12px] font-medium text-gray-700">New Report</span>
+              <img src="/report.png" alt="Export Report" className="h-4" />
+              <span className="text-[12px] font-medium text-gray-700">Export Report</span>
             </button>
             <img src="/separator.png" alt="" className="h-4" />
             <button
@@ -2203,13 +2214,6 @@ Keep it professional and suitable for a data analysis report.`;
               title="Check code for errors"
             >
               <img src="/check-code.png" alt="Check code" className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setShowApiKeyModal(true)}
-              className="px-2 py-0.5 bg-[#edeff0] hover:bg-[#d7dadc] text-[#3a7aaf] border border-[#d7dadc] rounded transition-all text-[10px] font-medium ml-2"
-              title="Update Anthropic API key"
-            >
-              Update API Key
             </button>
           </div>
         </div>
