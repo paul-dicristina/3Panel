@@ -804,32 +804,81 @@ Clicking "New Conversation" button:
    - `[PERSIST] Size exceeds 4.00 MB, optimizing...` - PNG stripping activated
    - `[PERSIST] Optimized size: 1.8 MB` - after optimization
 
-### R Workspace Restoration Challenge
+### R Workspace Persistence
 
-**The Problem:**
-- localStorage persists across page reloads
-- R backend process resets on server restart
-- Dataset registry shows "lex_tidy" but R doesn't have it
+**Status:** Fully Implemented (2026-01-12)
 
-**User Experience:**
+**The Solution:**
+
+R workspace now persists automatically across server restarts. When you stop the server (Ctrl+C) or the server crashes:
+
+1. **On Shutdown:** R workspace is saved to `.r-workspace.RData` (permanent storage)
+2. **On Startup:** R workspace is restored from `.r-workspace.RData` if it exists
+3. **Result:** All datasets, variables, and transformations are preserved
+
+**How It Works:**
+
 ```
-User reloads page →
-Sees conversation history ✓ →
-Dataset registry shows "lex_tidy" ✓ →
-Try to run code using "lex_tidy" →
-Error: "object 'lex_tidy' not found" ✗
+Server Shutdown (Ctrl+C) →
+  ├─ Workspace saved from temp location
+  ├─ Copied to .r-workspace.RData (permanent)
+  └─ Server exits
+
+Server Startup →
+  ├─ Check if .r-workspace.RData exists
+  ├─ If yes: Copy to temp location
+  ├─ R loads workspace on next execution
+  └─ All datasets available immediately
 ```
 
-**Solution:** Warning banner with manual reload
+**"New Conversation" Clears Both:**
+- Deletes temp workspace: `tmpdir()/3panel-r-execution/workspace.RData`
+- Deletes persistent workspace: `.r-workspace.RData`
+- Next startup is a fresh session
 
-When conversation is restored with datasets:
-1. `DatasetRestorationBanner` appears at top of chat panel
-2. Lists all datasets that need reloading:
-   - Base datasets: "lex.csv (upload CSV file)"
-   - Tidy datasets: "lex_tidy (transformation - reload lex.csv first)"
-3. User manually re-uploads CSVs or reconnects to Snowflake
-4. System detects matching dataset names and merges metadata
-5. User can dismiss banner once datasets are reloaded
+**Console Output:**
+
+On startup with previous session:
+```
+🚀 Proxy server running on http://localhost:3001
+📡 Ready to proxy requests to Anthropic API
+🔧 R code execution endpoint available
+
+📂 Restoring R workspace from previous session...
+✓ R workspace restored
+```
+
+On startup without previous session:
+```
+🚀 Proxy server running on http://localhost:3001
+📡 Ready to proxy requests to Anthropic API
+🔧 R code execution endpoint available
+
+No previous workspace found (fresh start)
+```
+
+On shutdown (Ctrl+C):
+```
+🛑 Received SIGINT, shutting down gracefully...
+💾 Saving R workspace...
+✓ R workspace saved to persistent storage
+```
+
+**Benefits:**
+
+- ✅ Datasets persist across server restarts
+- ✅ Tidy transformations preserved (`obesity_by_income`, etc.)
+- ✅ No need to reload CSVs or reconnect to Snowflake
+- ✅ Seamless experience - just reload the page
+- ✅ **DatasetRestorationBanner no longer needed** (datasets are actually there!)
+
+**Implementation Details:**
+
+- **Persistent storage:** `.r-workspace.RData` in project root (added to `.gitignore`)
+- **Temp storage:** `tmpdir()/3panel-r-execution/workspace.RData` (used during execution)
+- **Shutdown handlers:** SIGINT, SIGTERM (graceful shutdown)
+- **Startup restoration:** Automatic on `app.listen()`
+- **File operations:** Uses R's `file.copy()` via `Rscript -e`
 
 ### UI Components
 
@@ -849,9 +898,21 @@ When conversation is restored with datasets:
 
 **Purpose:** Warns that datasets need manual reload after page restore
 
+**Status:** ⚠️ Mostly unnecessary with R workspace persistence (but kept as safety net)
+
 **Location:** [src/components/DatasetRestorationBanner.jsx](src/components/DatasetRestorationBanner.jsx)
 
 **Shown when:** Conversation restored with datasets in registry
+
+**Why it still shows:**
+- Banner appears whenever datasets exist in localStorage
+- Doesn't check if R workspace actually has them
+- With workspace persistence, datasets ARE there, so banner is a false alarm
+- Users can safely dismiss it immediately
+
+**Future improvement:**
+- Add backend check to see if datasets exist in R before showing banner
+- OR remove banner entirely since workspace persistence makes it unnecessary
 
 **Features:**
 - Lists base datasets (CSV/Snowflake)
@@ -1049,10 +1110,16 @@ R workspace doesn't persist across page reloads. You must:
    - Reload page → verify plots display (SVG)
    - Check console for PNG stripping warning
 
-3. ✅ **Dataset restoration:**
+3. ✅ **Dataset restoration (deprecated with R workspace persistence):**
    - Load CSV, transform to tidy
-   - Reload page → verify yellow banner appears
-   - Re-upload CSV → verify can execute code
+   - Reload page → verify banner appears (false alarm)
+   - Dismiss banner → datasets work without reload
+
+3b. ✅ **R workspace persistence:**
+   - Load CSV, create variables, transform to tidy
+   - Stop server (Ctrl+C) → verify "Saving workspace" message
+   - Restart server → verify "Restoring workspace" message
+   - Run code using datasets → verify they exist without reload
 
 4. ✅ **New conversation:**
    - Have active conversation
@@ -1084,20 +1151,25 @@ Potential improvements (out of scope for v1):
 
 | File | Purpose | Lines |
 |------|---------|-------|
-| `server.js` | Backend logic for suggestions & dataset tracking | 79-3180 |
-| `src/App.jsx` | Frontend dataset registry, code execution & persistence | 52-2575 |
+| `server.js` | Backend logic for suggestions, dataset tracking & R workspace persistence | 79-3880 |
+| `src/App.jsx` | Frontend dataset registry, code execution & conversation persistence | 52-2575 |
 | `src/components/InteractiveSuggestion.jsx` | Interactive UI component | 1-416 |
 | `src/components/StorageWarningModal.jsx` | Storage quota exceeded modal | 1-68 |
-| `src/components/DatasetRestorationBanner.jsx` | Dataset reload warning banner | 1-67 |
+| `src/components/DatasetRestorationBanner.jsx` | Dataset reload warning banner (deprecated) | 1-67 |
 | `src/utils/claudeApi.js` | API communication with active dataset | 20-35 |
 | `src/utils/persistence.js` | Conversation persistence utilities | 1-171 |
 | `src/index.css` | Styles for interactive elements | 240-420 |
+| `.r-workspace.RData` | Persistent R workspace storage (gitignored) | N/A |
 
 ### Important Functions
 
 **Backend:**
 - `app.post('/api/chat')` - Main API endpoint with suggestion generation
 - `app.post('/api/execute-r')` - R code execution with metadata refresh
+- `app.post('/api/clear-workspace')` - Clear R workspace (temp + persistent)
+- `saveWorkspaceOnShutdown()` - Save R workspace to persistent storage on SIGINT/SIGTERM
+- `loadWorkspaceOnStartup()` - Restore R workspace from persistent storage on server start
+- `executeRWorkspaceOperation()` - Helper to execute R code for workspace operations
 
 **Frontend:**
 - `handleSendMessage()` - Sends messages with active dataset

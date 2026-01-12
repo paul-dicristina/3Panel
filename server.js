@@ -10,6 +10,7 @@ import cors from 'cors';
 import Anthropic from '@anthropic-ai/sdk';
 import { exec, spawn } from 'child_process';
 import { writeFile, unlink, mkdir } from 'fs/promises';
+import { existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
@@ -25,6 +26,11 @@ const __dirname = dirname(__filename);
 
 // Data folder path
 const DATA_FOLDER = join(__dirname, 'data');
+
+// Workspace paths
+const TEMP_DIR = join(tmpdir(), '3panel-r-execution');
+const TEMP_WORKSPACE = join(TEMP_DIR, 'workspace.RData');
+const PERSISTENT_WORKSPACE = join(__dirname, '.r-workspace.RData'); // Permanent storage
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -64,6 +70,24 @@ function checkQuartoAvailable() {
       } else {
         console.log('Quarto version:', stdout.trim());
         resolve(true);
+      }
+    });
+  });
+}
+
+/**
+ * Execute R code to save or load workspace
+ * @param {string} rCode - R code to execute
+ * @returns {Promise<void>}
+ */
+function executeRWorkspaceOperation(rCode) {
+  return new Promise((resolve, reject) => {
+    exec(`Rscript -e "${rCode}"`, (error, stdout, stderr) => {
+      if (error) {
+        console.error('R workspace operation error:', stderr || error.message);
+        reject(error);
+      } else {
+        resolve();
       }
     });
   });
@@ -3371,13 +3395,13 @@ Write your comprehensive report in JSON format based on this actual output.`;
  */
 app.post('/api/clear-workspace', async (req, res) => {
   try {
-    const tempDir = join(tmpdir(), '3panel-r-execution');
-    const workspacePath = join(tempDir, 'workspace.RData');
+    // Delete temp workspace file if it exists
+    await unlink(TEMP_WORKSPACE).catch(() => {});
 
-    // Delete workspace file if it exists
-    await unlink(workspacePath).catch(() => {});
+    // Delete persistent workspace file if it exists
+    await unlink(PERSISTENT_WORKSPACE).catch(() => {});
 
-    console.log('R workspace cleared');
+    console.log('R workspace cleared (temp + persistent)');
     res.json({ success: true });
   } catch (error) {
     console.error('Error clearing workspace:', error);
@@ -3779,9 +3803,76 @@ app.post('/api/create-quarto-report', async (req, res) => {
 // Serve reports directory
 app.use('/reports', express.static(join(__dirname, 'reports')));
 
+// ==================== WORKSPACE PERSISTENCE ====================
+
+/**
+ * Save R workspace to persistent storage on shutdown
+ */
+async function saveWorkspaceOnShutdown() {
+  console.log('\n💾 Saving R workspace...');
+  try {
+    // Ensure temp directory exists
+    await mkdir(TEMP_DIR, { recursive: true });
+
+    // Check if temp workspace exists
+    if (existsSync(TEMP_WORKSPACE)) {
+      // Copy temp workspace to persistent location
+      const copyCode = `file.copy("${TEMP_WORKSPACE.replace(/\\/g, '/')}", "${PERSISTENT_WORKSPACE.replace(/\\/g, '/')}", overwrite = TRUE)`;
+      await executeRWorkspaceOperation(copyCode);
+      console.log('✓ R workspace saved to persistent storage');
+    } else {
+      console.log('No workspace to save (session was empty)');
+    }
+  } catch (error) {
+    console.error('Error saving workspace:', error.message);
+  }
+}
+
+/**
+ * Load R workspace from persistent storage on startup
+ */
+async function loadWorkspaceOnStartup() {
+  try {
+    // Ensure temp directory exists
+    await mkdir(TEMP_DIR, { recursive: true });
+
+    // Check if persistent workspace exists
+    if (existsSync(PERSISTENT_WORKSPACE)) {
+      console.log('📂 Restoring R workspace from previous session...');
+      // Copy persistent workspace to temp location
+      const copyCode = `file.copy("${PERSISTENT_WORKSPACE.replace(/\\/g, '/')}", "${TEMP_WORKSPACE.replace(/\\/g, '/')}", overwrite = TRUE)`;
+      await executeRWorkspaceOperation(copyCode);
+      console.log('✓ R workspace restored');
+    } else {
+      console.log('No previous workspace found (fresh start)');
+    }
+  } catch (error) {
+    console.error('Error loading workspace:', error.message);
+  }
+}
+
+/**
+ * Handle graceful shutdown
+ */
+async function handleShutdown(signal) {
+  console.log(`\n\n🛑 Received ${signal}, shutting down gracefully...`);
+  await saveWorkspaceOnShutdown();
+  process.exit(0);
+}
+
+// Register shutdown handlers
+process.on('SIGINT', () => handleShutdown('SIGINT'));
+process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+
+// ==================== END WORKSPACE PERSISTENCE ====================
+
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`\n🚀 Proxy server running on http://localhost:${PORT}`);
-  console.log(`📡 Ready to proxy requests to Anthropic API\n`);
+  console.log(`📡 Ready to proxy requests to Anthropic API`);
   console.log(`🔧 R code execution endpoint available\n`);
+
+  // Restore workspace from previous session if it exists
+  await loadWorkspaceOnStartup();
+  console.log('');
 });
