@@ -2178,43 +2178,50 @@ Keep it professional and suitable for a data analysis report.`;
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {/* Output panel toolbar icons */}
-            <button
-              onClick={handleCreateReport}
-              className="flex items-center gap-1 hover:bg-gray-200 rounded transition-colors px-1 disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={favoritedCardIds.size === 0}
-              title={favoritedCardIds.size === 0 ? "Add outputs to favorites to export report" : "Export report from conversation"}
-            >
-              <img src="/report.png" alt="Export Report" className="h-4" />
-              <span className="text-[12px] font-medium text-gray-700">Export Report</span>
-            </button>
-            <img src="/separator.png" alt="" className="h-4" />
-            <button
-              onClick={handleToggleFavorite}
-              className="w-6 h-6 flex items-center justify-center hover:bg-gray-200 rounded transition-colors"
-              disabled={!selectedCardId}
-              title={selectedCardId && favoritedCardIds.has(selectedCardId) ? "Remove from favorites" : "Add to favorites"}
-            >
-              <img
-                src={selectedCardId && favoritedCardIds.has(selectedCardId) ? "/favorite-on.png" : "/favorite-off.png"}
-                alt="Favorite"
-                className="w-4 h-4"
-              />
-            </button>
-            <button
-              className="w-6 h-6 flex items-center justify-center hover:bg-gray-200 rounded transition-colors"
-              disabled={!selectedCardId}
-              title="Copy plot to clipboard"
-            >
-              <img src="/copy-plot.png" alt="Copy plot" className="w-4 h-4" />
-            </button>
-            <button
-              className="w-6 h-6 flex items-center justify-center hover:bg-gray-200 rounded transition-colors"
-              disabled={!selectedCardId}
-              title="Check code for errors"
-            >
-              <img src="/check-code.png" alt="Check code" className="w-4 h-4" />
-            </button>
+            {/* Export Report - only visible in Report mode */}
+            {viewMode === 'report' && (
+              <button
+                onClick={handleCreateReport}
+                className="flex items-center gap-1 hover:bg-gray-200 rounded transition-colors px-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={favoritedCardIds.size === 0}
+                title={favoritedCardIds.size === 0 ? "Add outputs to favorites to export report" : "Export report from conversation"}
+              >
+                <img src="/report.png" alt="Export Report" className="h-4" />
+                <span className="text-[12px] font-medium text-gray-700">Export Report</span>
+              </button>
+            )}
+
+            {/* Output panel toolbar icons - only visible in Explore mode */}
+            {viewMode === 'explore' && (
+              <>
+                <button
+                  onClick={handleToggleFavorite}
+                  className="w-6 h-6 flex items-center justify-center hover:bg-gray-200 rounded transition-colors"
+                  disabled={!selectedCardId}
+                  title={selectedCardId && favoritedCardIds.has(selectedCardId) ? "Remove from favorites" : "Add to favorites"}
+                >
+                  <img
+                    src={selectedCardId && favoritedCardIds.has(selectedCardId) ? "/favorite-on.png" : "/favorite-off.png"}
+                    alt="Favorite"
+                    className="w-4 h-4"
+                  />
+                </button>
+                <button
+                  className="w-6 h-6 flex items-center justify-center hover:bg-gray-200 rounded transition-colors"
+                  disabled={!selectedCardId}
+                  title="Copy plot to clipboard"
+                >
+                  <img src="/copy-plot.png" alt="Copy plot" className="w-4 h-4" />
+                </button>
+                <button
+                  className="w-6 h-6 flex items-center justify-center hover:bg-gray-200 rounded transition-colors"
+                  disabled={!selectedCardId}
+                  title="Check code for errors"
+                >
+                  <img src="/check-code.png" alt="Check code" className="w-4 h-4" />
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>
