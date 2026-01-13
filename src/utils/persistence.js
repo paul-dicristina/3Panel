@@ -122,6 +122,8 @@ export function validateState(state) {
   if (state.reportDescription !== undefined && typeof state.reportDescription !== 'string') return false;
   if (state.favoritedCardIds !== undefined && !Array.isArray(state.favoritedCardIds)) return false;
   if (state.favoritedOutputDescriptions !== undefined && typeof state.favoritedOutputDescriptions !== 'object') return false;
+  if (state.favoritedOutputHeadings !== undefined && typeof state.favoritedOutputHeadings !== 'object') return false;
+  if (state.reportHistory !== undefined && !Array.isArray(state.reportHistory)) return false;
   if (state.datasetRegistry !== undefined && typeof state.datasetRegistry !== 'object') return false;
   if (state.viewMode !== undefined && typeof state.viewMode !== 'string') return false;
   if (state.expandedSuggestions !== undefined && !Array.isArray(state.expandedSuggestions)) return false;
@@ -142,6 +144,8 @@ export function getDefaultState() {
     reportDescription: '',
     favoritedCardIds: new Set(),
     favoritedOutputDescriptions: {},
+    favoritedOutputHeadings: {},
+    reportHistory: [],
     datasetRegistry: { activeDataset: null, datasets: {} },
     viewMode: 'explore',
     selectedCardId: null,

@@ -12,6 +12,7 @@ import StorageWarningModal from './components/StorageWarningModal';
 import DatasetRestorationBanner from './components/DatasetRestorationBanner';
 import InteractiveSuggestion from './components/InteractiveSuggestion';
 import ReactiveComponent from './components/ReactiveComponent';
+import ReportRewriteModal from './components/ReportRewriteModal';
 import { sendMessageToClaude } from './utils/claudeApi';
 import { executeRCode } from './utils/rExecutor';
 import {
@@ -75,6 +76,12 @@ function App() {
   const [reportTitle, setReportTitle] = useState('');
   const [reportDescription, setReportDescription] = useState('');
   const [favoritedOutputDescriptions, setFavoritedOutputDescriptions] = useState({});
+  const [favoritedOutputHeadings, setFavoritedOutputHeadings] = useState({});
+
+  // Report rewrite state
+  const [showRewriteModal, setShowRewriteModal] = useState(false);
+  const [isRewriteProcessing, setIsRewriteProcessing] = useState(false);
+  const [reportHistory, setReportHistory] = useState([]);
 
   const [isSubmitAnimating, setIsSubmitAnimating] = useState(false);
   const [expandedSuggestions, setExpandedSuggestions] = useState(new Set()); // Track which message IDs have expanded suggestions
@@ -1187,6 +1194,8 @@ Please respond with a JSON object in this format:
     setReportDescription('');
     setFavoritedCardIds(new Set());
     setFavoritedOutputDescriptions({});
+    setFavoritedOutputHeadings({});
+    setReportHistory([]);
 
     // Clear persisted state from localStorage
     clearConversationState();
@@ -1647,6 +1656,301 @@ Keep it professional and suitable for a data analysis report.`;
       }
     }
   };
+
+  // ===== Report Rewrite Functions =====
+
+  /**
+   * Create a snapshot of current report state for undo
+   */
+  const createReportSnapshot = () => {
+    return {
+      timestamp: Date.now(),
+      reportTitle,
+      reportDescription,
+      favoritedCardIds: Array.from(favoritedCardIds), // Preserve order
+      favoritedOutputDescriptions: { ...favoritedOutputDescriptions },
+      favoritedOutputHeadings: { ...favoritedOutputHeadings }
+    };
+  };
+
+  /**
+   * Apply rewritten report data (atomic update)
+   * @param {Object} rewrittenReport - Contains title, description, outputs array
+   */
+  const applyRewrittenReport = (rewrittenReport) => {
+    // 1. Save current state to history (limit to 5 entries)
+    setReportHistory(prev => {
+      const newHistory = [...prev, createReportSnapshot()];
+      return newHistory.slice(-5); // Keep only last 5
+    });
+
+    // 2. Extract new data
+    const newTitle = rewrittenReport.title;
+    const newDescription = rewrittenReport.description;
+    const newOrder = rewrittenReport.outputs.map(o => o.cardId);
+    const newDescriptions = rewrittenReport.outputs.reduce((acc, output) => {
+      acc[output.cardId] = output.description;
+      return acc;
+    }, {});
+    const newHeadings = rewrittenReport.outputs.reduce((acc, output) => {
+      acc[output.cardId] = output.heading;
+      return acc;
+    }, {});
+
+    // 3. Apply changes atomically (React batches these)
+    setReportTitle(newTitle);
+    setReportDescription(newDescription);
+    setFavoritedCardIds(new Set(newOrder)); // Set preserves insertion order!
+    setFavoritedOutputDescriptions(newDescriptions);
+    setFavoritedOutputHeadings(newHeadings);
+
+    console.log('[Rewrite Report] Applied successfully:', {
+      title: newTitle,
+      outputCount: newOrder.length,
+      newOrder
+    });
+  };
+
+  /**
+   * Undo the last rewrite operation
+   */
+  const handleUndoRewrite = () => {
+    if (reportHistory.length === 0) return;
+
+    // Get most recent snapshot
+    const previousState = reportHistory[reportHistory.length - 1];
+
+    // Restore state
+    setReportTitle(previousState.reportTitle);
+    setReportDescription(previousState.reportDescription);
+    setFavoritedCardIds(new Set(previousState.favoritedCardIds));
+    setFavoritedOutputDescriptions(previousState.favoritedOutputDescriptions);
+    setFavoritedOutputHeadings(previousState.favoritedOutputHeadings);
+
+    // Remove from history
+    setReportHistory(prev => prev.slice(0, -1));
+
+    console.log('[Rewrite Report] Undone successfully');
+  };
+
+  /**
+   * Build the prompt for Claude to rewrite the report
+   */
+  const buildRewritePrompt = (payload) => {
+    const styleGuidelines = {
+      'Formal & Technical': 'Use precise technical terminology and statistical language. Include specific metrics. Maintain objective, academic tone. Target: Technical experts and data scientists.',
+      'Formal & Accessible': 'Use clear, professional language without heavy jargon. Explain technical concepts in understandable terms. Maintain professional tone. Target: Business stakeholders and managers.',
+      'Casual & Technical': 'Use conversational tone with technical accuracy. Include technical details but in friendly language. Less formal structure. Target: Technical team members.',
+      'Casual & Accessible': 'Use simple, everyday language. Focus on big picture insights. Conversational and engaging tone. Target: General audience, executives.',
+      'Brief & Focused': 'Extremely concise (1-2 sentences per output). Only essential information. Bullet-point style. Target: Quick review, time-constrained readers.',
+      'Detailed & Comprehensive': 'Thorough explanations (3-4 sentences per output). Include context, methodology notes, and implications. Academic style. Target: Detailed documentation, research papers.'
+    };
+
+    return `You are a professional data analyst and report writer. Your task is to rewrite and reorganize a data analysis report.
+
+REPORT OBJECTIVE:
+${payload.objective}
+
+WRITING STYLE: ${payload.style}
+${styleGuidelines[payload.style] || styleGuidelines['Formal & Technical']}
+
+CURRENT REPORT:
+Title: ${payload.reportTitle}
+Description: ${payload.reportDescription}
+
+FAVORITED OUTPUTS (${payload.favoritedOutputs.length} items):
+${payload.favoritedOutputs.map((output, idx) => `
+${idx + 1}. [ID: ${output.cardId}]
+   Current Description: ${output.description}
+   Code Context: ${output.code.substring(0, 200)}${output.code.length > 200 ? '...' : ''}
+   Output Types: ${output.hasPlot ? 'Plot' : ''} ${output.hasText ? 'Text' : ''} ${output.hasError ? 'Error' : ''}
+`).join('\n')}
+
+YOUR TASK:
+1. Rewrite the report TITLE to better match the objective (3-9 words)
+2. Rewrite the report DESCRIPTION to set appropriate context (2-4 sentences)
+3. For EACH favorited output:
+   - Create a section HEADING (4-8 words, clear and descriptive)
+   - Rewrite its description to match the style and objective
+   - Keep descriptions concise (2-3 sentences, or 1-2 for Brief style, 3-4 for Detailed style)
+   - Focus on insights and findings, not technical implementation
+4. REORDER the outputs to create a logical narrative flow
+
+CRITICAL REQUIREMENTS:
+- You MUST include ALL ${payload.favoritedOutputs.length} outputs in your response
+- Each output MUST use the EXACT cardId from the input
+- Each output MUST have both a "heading" and "description" field
+- The order you specify will be the order shown in the report
+- Maintain factual accuracy - don't invent findings
+
+Respond with ONLY a JSON code block in this format:
+\`\`\`json
+{
+  "title": "Rewritten report title (3-9 words)",
+  "description": "Rewritten report description (2-4 sentences)",
+  "outputs": [
+    {
+      "cardId": "exact-id-from-input",
+      "heading": "Section heading for this output (4-8 words)",
+      "description": "Rewritten output description"
+    }
+  ]
+}
+\`\`\``;
+  };
+
+  /**
+   * Validate Claude's rewrite response
+   * @returns {{ valid: boolean, error?: string }}
+   */
+  const validateRewriteResponse = (response, originalCardIds) => {
+    // Basic structure
+    if (!response || typeof response !== 'object') {
+      return { valid: false, error: 'Invalid response format' };
+    }
+
+    if (!response.title || typeof response.title !== 'string') {
+      return { valid: false, error: 'Missing or invalid title' };
+    }
+
+    if (!response.description || typeof response.description !== 'string') {
+      return { valid: false, error: 'Missing or invalid description' };
+    }
+
+    if (!Array.isArray(response.outputs)) {
+      return { valid: false, error: 'Missing or invalid outputs array' };
+    }
+
+    // Count validation
+    if (response.outputs.length !== originalCardIds.length) {
+      return {
+        valid: false,
+        error: `Expected ${originalCardIds.length} outputs, got ${response.outputs.length}`
+      };
+    }
+
+    // CardId validation
+    const responseCardIds = new Set();
+    const originalCardIdSet = new Set(originalCardIds);
+
+    for (const output of response.outputs) {
+      if (!output.cardId || typeof output.cardId !== 'string') {
+        return { valid: false, error: 'Output missing cardId' };
+      }
+
+      if (!output.heading || typeof output.heading !== 'string') {
+        return { valid: false, error: `Output ${output.cardId} missing heading` };
+      }
+
+      if (!output.description || typeof output.description !== 'string') {
+        return { valid: false, error: `Output ${output.cardId} missing description` };
+      }
+
+      if (responseCardIds.has(output.cardId)) {
+        return { valid: false, error: `Duplicate cardId: ${output.cardId}` };
+      }
+
+      if (!originalCardIdSet.has(output.cardId)) {
+        return { valid: false, error: `Unknown cardId: ${output.cardId}` };
+      }
+
+      responseCardIds.add(output.cardId);
+    }
+
+    // All original IDs must be present
+    for (const id of originalCardIds) {
+      if (!responseCardIds.has(id)) {
+        return { valid: false, error: `Missing cardId: ${id}` };
+      }
+    }
+
+    return { valid: true };
+  };
+
+  /**
+   * Handle report rewrite request
+   * @param {string} objective - User's stated purpose for the report
+   * @param {string} style - Selected writing style preset
+   */
+  const handleRewriteReport = async (objective, style) => {
+    setIsRewriteProcessing(true);
+
+    try {
+      // Build payload
+      const payload = {
+        apiKey,
+        objective,
+        style,
+        reportTitle,
+        reportDescription,
+        favoritedOutputs: Array.from(favoritedCardIds).map(cardId => {
+          const card = codeCards.find(c => c.id === cardId);
+          return {
+            cardId,
+            description: favoritedOutputDescriptions[cardId] || '',
+            code: card?.code || '',
+            hasPlot: card?.output?.plots?.length > 0,
+            hasText: !!card?.output?.text,
+            hasError: !!card?.output?.error
+          };
+        })
+      };
+
+      // Call backend
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          apiKey: payload.apiKey,
+          messages: [{
+            role: 'user',
+            content: buildRewritePrompt(payload)
+          }],
+          suggestionsEnabled: false
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      // Extract JSON from Claude's response
+      const jsonMatch = result.data.content[0].text.match(/```json\n([\s\S]*?)\n```/);
+      if (!jsonMatch) {
+        throw new Error('Claude did not return valid JSON');
+      }
+
+      const rewrittenReport = JSON.parse(jsonMatch[1]);
+
+      // Validate response
+      const validation = validateRewriteResponse(
+        rewrittenReport,
+        Array.from(favoritedCardIds)
+      );
+
+      if (!validation.valid) {
+        throw new Error(validation.error);
+      }
+
+      // Apply changes atomically
+      applyRewrittenReport(rewrittenReport);
+
+      setShowRewriteModal(false);
+
+    } catch (error) {
+      console.error('[Rewrite Report] Error:', error);
+      alert(
+        `Failed to rewrite report: ${error.message}\n\n` +
+        `Try again or rephrase your objective.`
+      );
+    } finally {
+      setIsRewriteProcessing(false);
+    }
+  };
+
+  // ===== End Report Rewrite Functions =====
 
   // Execute R code and update output
   const executeSelectedCode = async (code, cardId) => {
@@ -2178,6 +2482,35 @@ Keep it professional and suitable for a data analysis report.`;
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* Rewrite Report - only visible in Report mode */}
+            {viewMode === 'report' && (
+              <button
+                onClick={() => setShowRewriteModal(true)}
+                className="flex items-center gap-1 hover:bg-gray-200 rounded transition-colors px-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={favoritedCardIds.size === 0 || isRewriteProcessing}
+                title={
+                  favoritedCardIds.size === 0
+                    ? "Add outputs to favorites to rewrite report"
+                    : "Rewrite and reorganize report"
+                }
+              >
+                <img src="/rewrite.png" alt="Rewrite Report" className="h-4" />
+                <span className="text-[12px] font-medium text-gray-700">Rewrite Report</span>
+              </button>
+            )}
+
+            {/* Undo - only visible in Report mode when history exists */}
+            {viewMode === 'report' && reportHistory.length > 0 && (
+              <button
+                onClick={handleUndoRewrite}
+                className="flex items-center gap-1 hover:bg-gray-200 rounded transition-colors px-1"
+                title="Undo last rewrite"
+              >
+                <img src="/undo.png" alt="Undo" className="h-4" />
+                <span className="text-[12px] font-medium text-gray-700">Undo</span>
+              </button>
+            )}
+
             {/* Export Report - only visible in Report mode */}
             {viewMode === 'report' && (
               <button
@@ -2466,10 +2799,18 @@ Keep it professional and suitable for a data analysis report.`;
                     const card = codeCards.find(c => c.id === cardId);
                     if (!card) return null;
 
+                    const heading = favoritedOutputHeadings[cardId];
                     const description = favoritedOutputDescriptions[cardId];
 
                     return (
                       <div key={cardId} className="mb-8 pb-8 border-b border-gray-200 last:border-b-0">
+                        {/* Section heading */}
+                        {heading && (
+                          <h3 className="text-lg font-semibold text-gray-900 mb-3">
+                            {heading}
+                          </h3>
+                        )}
+
                         {/* Description paragraph */}
                         {description && (
                           <p className="text-sm text-gray-700 mb-4 leading-relaxed">{description}</p>
@@ -2578,6 +2919,14 @@ Keep it professional and suitable for a data analysis report.`;
         isOpen={showStorageWarning}
         onClearAndContinue={handleClearStorageAndContinue}
         onDismiss={handleDismissStorageWarning}
+      />
+
+      {/* Report Rewrite Modal */}
+      <ReportRewriteModal
+        isOpen={showRewriteModal}
+        onRewrite={handleRewriteReport}
+        onCancel={() => setShowRewriteModal(false)}
+        isProcessing={isRewriteProcessing}
       />
     </div>
   );
