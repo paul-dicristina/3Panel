@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 /**
  * ReportRewriteModal Component
@@ -10,6 +10,26 @@ const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing }) => {
   const [objective, setObjective] = useState('');
   const [style, setStyle] = useState('Formal & Technical');
   const [showError, setShowError] = useState(false);
+
+  // Handle ESC key to close modal
+  useEffect(() => {
+    const handleEscKey = (event) => {
+      if (event.key === 'Escape' && isOpen && !isProcessing) {
+        setObjective('');
+        setStyle('Formal & Technical');
+        setShowError(false);
+        onCancel();
+      }
+    };
+
+    if (isOpen) {
+      document.addEventListener('keydown', handleEscKey);
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleEscKey);
+    };
+  }, [isOpen, isProcessing, onCancel]);
 
   if (!isOpen) return null;
 
@@ -37,7 +57,7 @@ const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing }) => {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black bg-opacity-20 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-[500px]">
         <h2 className="text-2xl font-bold mb-2 text-gray-800">
           Rewrite Report
@@ -48,7 +68,7 @@ const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing }) => {
 
         {/* Report Objective */}
         <div className="mb-4">
-          <label className="block text-base font-medium text-gray-700 mb-2">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
             What is the purpose of this report?
           </label>
           <textarea
@@ -61,7 +81,7 @@ const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing }) => {
             }}
             placeholder="e.g., Executive summary for stakeholders, Technical analysis for data scientists"
             rows={3}
-            className={`w-full px-4 py-2 text-base border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none ${
+            className={`w-full px-4 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none ${
               showError ? 'border-red-500' : 'border-gray-300'
             }`}
             disabled={isProcessing}
@@ -76,13 +96,13 @@ const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing }) => {
 
         {/* Writing Style */}
         <div className="mb-6">
-          <label className="block text-base font-medium text-gray-700 mb-2">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
             Writing Style
           </label>
           <select
             value={style}
             onChange={(e) => setStyle(e.target.value)}
-            className="w-full pl-4 pr-8 py-2 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-no-repeat"
+            className="w-full pl-4 pr-8 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-no-repeat"
             style={{
               backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23374151'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
               backgroundPosition: 'right 0.5rem center',
@@ -104,14 +124,14 @@ const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing }) => {
           <button
             onClick={handleCancel}
             disabled={isProcessing}
-            className="px-4 py-2 text-gray-600 hover:text-gray-800 font-medium rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Cancel
           </button>
           <button
             onClick={handleSubmit}
             disabled={isProcessing}
-            className="px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+            className="px-4 py-2 text-sm bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
           >
             {isProcessing ? (
               <>
