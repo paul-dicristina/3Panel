@@ -129,6 +129,8 @@ function App() {
           reportDescription,
           favoritedCardIds,
           favoritedOutputDescriptions,
+          favoritedOutputHeadings,
+          reportHistory,
           datasetRegistry,
           viewMode,
           selectedCardId,
@@ -245,6 +247,8 @@ function App() {
       setReportDescription(typeof state.reportDescription === 'string' ? state.reportDescription : '');
       setFavoritedCardIds(state.favoritedCardIds instanceof Set ? state.favoritedCardIds : new Set());
       setFavoritedOutputDescriptions(typeof state.favoritedOutputDescriptions === 'object' ? state.favoritedOutputDescriptions : {});
+      setFavoritedOutputHeadings(typeof state.favoritedOutputHeadings === 'object' ? state.favoritedOutputHeadings : {});
+      setReportHistory(Array.isArray(state.reportHistory) ? state.reportHistory : []);
       setDatasetRegistry(typeof state.datasetRegistry === 'object' ? state.datasetRegistry : { activeDataset: null, datasets: {} });
       setViewMode(typeof state.viewMode === 'string' ? state.viewMode : 'explore');
       setSelectedCardId(state.selectedCardId || null);
