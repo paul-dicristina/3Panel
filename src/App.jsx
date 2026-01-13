@@ -82,6 +82,7 @@ function App() {
   const [showRewriteModal, setShowRewriteModal] = useState(false);
   const [isRewriteProcessing, setIsRewriteProcessing] = useState(false);
   const [reportHistory, setReportHistory] = useState([]);
+  const [reportRedoStack, setReportRedoStack] = useState([]);
 
   const [isSubmitAnimating, setIsSubmitAnimating] = useState(false);
   const [expandedSuggestions, setExpandedSuggestions] = useState(new Set()); // Track which message IDs have expanded suggestions
@@ -131,6 +132,7 @@ function App() {
           favoritedOutputDescriptions,
           favoritedOutputHeadings,
           reportHistory,
+          reportRedoStack,
           datasetRegistry,
           viewMode,
           selectedCardId,
@@ -249,6 +251,7 @@ function App() {
       setFavoritedOutputDescriptions(typeof state.favoritedOutputDescriptions === 'object' ? state.favoritedOutputDescriptions : {});
       setFavoritedOutputHeadings(typeof state.favoritedOutputHeadings === 'object' ? state.favoritedOutputHeadings : {});
       setReportHistory(Array.isArray(state.reportHistory) ? state.reportHistory : []);
+      setReportRedoStack(Array.isArray(state.reportRedoStack) ? state.reportRedoStack : []);
       setDatasetRegistry(typeof state.datasetRegistry === 'object' ? state.datasetRegistry : { activeDataset: null, datasets: {} });
       setViewMode(typeof state.viewMode === 'string' ? state.viewMode : 'explore');
       setSelectedCardId(state.selectedCardId || null);
@@ -563,6 +566,9 @@ function App() {
     reportDescription,
     favoritedCardIds,
     favoritedOutputDescriptions,
+    favoritedOutputHeadings,
+    reportHistory,
+    reportRedoStack,
     datasetRegistry,
     viewMode,
     selectedCardId
@@ -1200,6 +1206,7 @@ Please respond with a JSON object in this format:
     setFavoritedOutputDescriptions({});
     setFavoritedOutputHeadings({});
     setReportHistory([]);
+    setReportRedoStack([]);
 
     // Clear persisted state from localStorage
     clearConversationState();
@@ -1688,6 +1695,9 @@ Keep it professional and suitable for a data analysis report.`;
       return newHistory.slice(-5); // Keep only last 5
     });
 
+    // Clear redo stack (new timeline branch)
+    setReportRedoStack([]);
+
     // 2. Extract new data
     const newTitle = rewrittenReport.title;
     const newDescription = rewrittenReport.description;
@@ -1721,6 +1731,12 @@ Keep it professional and suitable for a data analysis report.`;
   const handleUndoRewrite = () => {
     if (reportHistory.length === 0) return;
 
+    // Save current state to redo stack before undoing
+    setReportRedoStack(prev => {
+      const newRedoStack = [...prev, createReportSnapshot()];
+      return newRedoStack.slice(-5); // Keep only last 5
+    });
+
     // Get most recent snapshot
     const previousState = reportHistory[reportHistory.length - 1];
 
@@ -1735,6 +1751,34 @@ Keep it professional and suitable for a data analysis report.`;
     setReportHistory(prev => prev.slice(0, -1));
 
     console.log('[Rewrite Report] Undone successfully');
+  };
+
+  /**
+   * Redo the last undone rewrite operation
+   */
+  const handleRedoRewrite = () => {
+    if (reportRedoStack.length === 0) return;
+
+    // Save current state to undo history before redoing
+    setReportHistory(prev => {
+      const newHistory = [...prev, createReportSnapshot()];
+      return newHistory.slice(-5); // Keep only last 5
+    });
+
+    // Get most recent redo state
+    const redoState = reportRedoStack[reportRedoStack.length - 1];
+
+    // Restore state
+    setReportTitle(redoState.reportTitle);
+    setReportDescription(redoState.reportDescription);
+    setFavoritedCardIds(new Set(redoState.favoritedCardIds));
+    setFavoritedOutputDescriptions(redoState.favoritedOutputDescriptions);
+    setFavoritedOutputHeadings(redoState.favoritedOutputHeadings);
+
+    // Remove from redo stack
+    setReportRedoStack(prev => prev.slice(0, -1));
+
+    console.log('[Rewrite Report] Redone successfully');
   };
 
   /**
@@ -2512,6 +2556,18 @@ Respond with ONLY a JSON code block in this format:
               >
                 <img src="/undo.png" alt="Undo" className="h-4" />
                 <span className="text-[12px] font-medium text-gray-700">Undo</span>
+              </button>
+            )}
+
+            {/* Redo - only visible in Report mode when redo stack exists */}
+            {viewMode === 'report' && reportRedoStack.length > 0 && (
+              <button
+                onClick={handleRedoRewrite}
+                className="flex items-center gap-1 hover:bg-gray-200 rounded transition-colors px-1"
+                title="Redo last undone rewrite"
+              >
+                <img src="/redo.png" alt="Redo" className="h-4" />
+                <span className="text-[12px] font-medium text-gray-700">Redo</span>
               </button>
             )}
 
