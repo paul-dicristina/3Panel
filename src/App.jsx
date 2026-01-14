@@ -1607,7 +1607,7 @@ Please respond with a JSON object in this format:
           'Casual & Technical': 'Use conversational tone with technical accuracy. Include technical details but in friendly language.',
           'Casual & Accessible': 'Use simple, everyday language. Focus on big picture insights. Conversational and engaging tone.',
           'Brief & Focused': 'Extremely concise (1-2 sentences). Only essential information.',
-          'Detailed & Comprehensive': 'Thorough explanations (3-4 sentences). Include context and implications.'
+          'Detailed & Thorough': 'Thorough explanations (3-4 sentences). Include context and implications.'
         };
 
         prompt = `You are writing a description for a data analysis report with the following context:
@@ -1624,7 +1624,7 @@ ${card.code}
 
 Please write a concise description of what this output shows, matching the writing style and report objective above. Focus on the key findings or insights, not the technical details of how it was generated.
 
-${lastRewriteStyle === 'Brief & Focused' ? 'Keep it to 1-2 sentences.' : lastRewriteStyle === 'Detailed & Comprehensive' ? 'Write 3-4 sentences with thorough context.' : 'Write 2-3 sentences.'}`;
+${lastRewriteStyle === 'Brief & Focused' ? 'Keep it to 1-2 sentences.' : lastRewriteStyle === 'Detailed & Thorough' ? 'Write 3-4 sentences with thorough context.' : 'Write 2-3 sentences.'}`;
       } else {
         // Default prompt (no rewrite context)
         prompt = `You are analyzing R code output for a data analysis report.
@@ -1840,7 +1840,7 @@ Keep it professional and suitable for a data analysis report.`;
       'Casual & Technical': 'Use conversational tone with technical accuracy. Include technical details but in friendly language. Less formal structure. Target: Technical team members.',
       'Casual & Accessible': 'Use simple, everyday language. Focus on big picture insights. Conversational and engaging tone. Target: General audience, executives.',
       'Brief & Focused': 'Extremely concise (1-2 sentences per output). Only essential information. Bullet-point style. Target: Quick review, time-constrained readers.',
-      'Detailed & Comprehensive': 'Thorough explanations (3-4 sentences per output). Include context, methodology notes, and implications. Academic style. Target: Detailed documentation, research papers.'
+      'Detailed & Thorough': 'Thorough explanations (3-4 sentences per output). Include context, methodology notes, and implications. Academic style. Target: Detailed documentation, research papers.'
     };
 
     return `You are a professional data analyst and report writer. Your task is to rewrite and reorganize a data analysis report.

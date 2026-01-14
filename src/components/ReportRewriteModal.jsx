@@ -10,26 +10,71 @@ const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing }) => {
   const [objective, setObjective] = useState('');
   const [style, setStyle] = useState('Formal & Technical');
   const [showError, setShowError] = useState(false);
+  const [focusedIndex, setFocusedIndex] = useState(null);
 
-  // Handle ESC key to close modal
+  const styleOptions = [
+    'Formal & Technical',
+    'Casual & Technical',
+    'Brief & Focused',
+    'Formal & Accessible',
+    'Casual & Accessible',
+    'Detailed & Thorough'
+  ];
+
+  // Handle keyboard navigation for style selector
   useEffect(() => {
-    const handleEscKey = (event) => {
-      if (event.key === 'Escape' && isOpen && !isProcessing) {
+    const handleKeyDown = (event) => {
+      if (!isOpen || isProcessing) return;
+
+      // ESC to close modal
+      if (event.key === 'Escape') {
         setObjective('');
         setStyle('Formal & Technical');
         setShowError(false);
+        setFocusedIndex(null);
         onCancel();
+        return;
+      }
+
+      // Only handle arrow keys and Enter/Space if a style button has focus
+      if (focusedIndex === null) return;
+
+      const gridCols = 3;
+      const totalOptions = styleOptions.length;
+
+      switch (event.key) {
+        case 'ArrowRight':
+          event.preventDefault();
+          setFocusedIndex((focusedIndex + 1) % totalOptions);
+          break;
+        case 'ArrowLeft':
+          event.preventDefault();
+          setFocusedIndex((focusedIndex - 1 + totalOptions) % totalOptions);
+          break;
+        case 'ArrowDown':
+          event.preventDefault();
+          setFocusedIndex((focusedIndex + gridCols) % totalOptions);
+          break;
+        case 'ArrowUp':
+          event.preventDefault();
+          setFocusedIndex((focusedIndex - gridCols + totalOptions) % totalOptions);
+          break;
+        case 'Enter':
+        case ' ':
+          event.preventDefault();
+          setStyle(styleOptions[focusedIndex]);
+          break;
       }
     };
 
     if (isOpen) {
-      document.addEventListener('keydown', handleEscKey);
+      document.addEventListener('keydown', handleKeyDown);
     }
 
     return () => {
-      document.removeEventListener('keydown', handleEscKey);
+      document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isOpen, isProcessing, onCancel]);
+  }, [isOpen, isProcessing, focusedIndex, onCancel, styleOptions]);
 
   if (!isOpen) return null;
 
@@ -99,24 +144,41 @@ const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing }) => {
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Writing Style
           </label>
-          <select
-            value={style}
-            onChange={(e) => setStyle(e.target.value)}
-            className="w-full pl-4 pr-8 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3686c1] appearance-none bg-no-repeat"
-            style={{
-              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23374151'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
-              backgroundPosition: 'right 0.5rem center',
-              backgroundSize: '1.125em 1.125em'
-            }}
-            disabled={isProcessing}
-          >
-            <option value="Formal & Technical">Formal &amp; Technical</option>
-            <option value="Formal & Accessible">Formal &amp; Accessible</option>
-            <option value="Casual & Technical">Casual &amp; Technical</option>
-            <option value="Casual & Accessible">Casual &amp; Accessible</option>
-            <option value="Brief & Focused">Brief &amp; Focused</option>
-            <option value="Detailed & Comprehensive">Detailed &amp; Comprehensive</option>
-          </select>
+          <div className="border border-gray-300 rounded-lg overflow-hidden">
+            <div className="grid grid-cols-3">
+              {styleOptions.map((option, index) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => {
+                    setStyle(option);
+                    setFocusedIndex(index);
+                  }}
+                  onFocus={() => setFocusedIndex(index)}
+                  onBlur={() => setFocusedIndex(null)}
+                  disabled={isProcessing}
+                  className={`
+                    text-[13px] py-3 px-4
+                    ${index < 3 ? 'border-b border-gray-300' : ''}
+                    ${index % 3 !== 2 ? 'border-r border-gray-300' : ''}
+                    ${style === option
+                      ? 'bg-[#3686c1] text-white font-bold'
+                      : 'bg-white text-gray-700 hover:bg-gray-50'
+                    }
+                    ${focusedIndex === index && style !== option
+                      ? 'ring-2 ring-inset ring-[#3686c1]'
+                      : ''
+                    }
+                    disabled:opacity-50 disabled:cursor-not-allowed
+                    transition-colors
+                    focus:outline-none
+                  `}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* Action Buttons */}

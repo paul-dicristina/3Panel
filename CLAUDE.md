@@ -307,7 +307,7 @@ Located in the toolbar, visible only when `viewMode === 'report'`:
      - **Casual & Technical**: Conversational tone with technical accuracy
      - **Casual & Accessible**: Simple everyday language, big picture focus
      - **Brief & Focused**: 1-2 sentences per output, essential information only
-     - **Detailed & Comprehensive**: 3-4 sentences per output with context
+     - **Detailed & Thorough**: 3-4 sentences per output with context
    - Focus ring: `#3686c1`
 
 3. **Action Buttons**
