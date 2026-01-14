@@ -5,14 +5,15 @@ This document describes how 3Panel's interactive suggestions and automatic datas
 ## Table of Contents
 
 1. [Mode Selector Control](#mode-selector-control)
-2. [Important Bug Fixes](#important-bug-fixes)
-3. [Interactive Suggestions Overview](#interactive-suggestions-overview)
-4. [How Interactive Elements Are Created](#how-interactive-elements-are-created)
-5. [Dataset Naming Convention](#dataset-naming-convention)
-6. [Automatic Dataset Tracking](#automatic-dataset-tracking)
-7. [Metadata Flow](#metadata-flow)
-8. [Conversation Persistence](#conversation-persistence)
-9. [Troubleshooting](#troubleshooting)
+2. [Report Rewrite Feature](#report-rewrite-feature)
+3. [Important Bug Fixes](#important-bug-fixes)
+4. [Interactive Suggestions Overview](#interactive-suggestions-overview)
+5. [How Interactive Elements Are Created](#how-interactive-elements-are-created)
+6. [Dataset Naming Convention](#dataset-naming-convention)
+7. [Automatic Dataset Tracking](#automatic-dataset-tracking)
+8. [Metadata Flow](#metadata-flow)
+9. [Conversation Persistence](#conversation-persistence)
+10. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -225,6 +226,336 @@ const [favoritedOutputDescriptions, setFavoritedOutputDescriptions] = useState({
   </div>
 </div>
 ```
+
+---
+
+## Report Rewrite Feature
+
+**Status:** Fully Implemented (2026-01-14)
+
+The Report Rewrite feature allows users to reorganize and restyle their data analysis reports using Claude AI. Users can specify a report objective and writing style, then Claude rewrites the report title, description, section headings, output descriptions, and reorders favorited outputs to create a cohesive narrative.
+
+### Key Features
+
+- **AI-Powered Rewriting**: Claude rewrites all report text to match user-specified objective and style
+- **Automatic Reordering**: Outputs are reorganized into a logical narrative flow
+- **Section Headings**: Each favorited output receives a descriptive heading (4-8 words)
+- **Six Writing Styles**: Formal/Casual × Technical/Accessible, Brief, Detailed
+- **Full Undo/Redo**: Navigate through rewrite history (last 5 operations)
+- **Persistent Context**: Re-favorited outputs maintain the report's writing style
+- **Persisted State**: Rewrite history saved across page reloads
+
+### User Interface
+
+#### Toolbar Buttons (Report Mode Only)
+
+Located in the toolbar, visible only when `viewMode === 'report'`:
+
+1. **Rewrite Report Button**
+   - Icon: `/rewrite.png` (16x16px)
+   - Label: "Rewrite Report"
+   - Disabled when: No outputs favorited OR processing
+   - Tooltip (disabled): "Add outputs to favorites to rewrite report"
+   - Tooltip (enabled): "Rewrite and reorganize report"
+   - Location: [App.jsx:2533-2548](src/App.jsx#L2533-L2548)
+
+2. **Undo Button**
+   - Icon: `/undo.png` (16x16px, icon-only)
+   - Always visible in Report mode
+   - Disabled when: `reportHistory.length === 0`
+   - Tooltip (disabled): "No rewrites to undo"
+   - Tooltip (enabled): "Undo last rewrite"
+   - Location: [App.jsx:2550-2560](src/App.jsx#L2550-L2560)
+
+3. **Redo Button**
+   - Icon: `/redo.png` (16x16px, icon-only)
+   - Always visible in Report mode
+   - Disabled when: `reportRedoStack.length === 0`
+   - Tooltip (disabled): "No rewrites to redo"
+   - Tooltip (enabled): "Redo last undone rewrite"
+   - Location: [App.jsx:2562-2572](src/App.jsx#L2562-L2572)
+
+4. **Visual Separator**
+   - Vertical divider before Export Report button
+   - Separates rewrite actions from export action
+
+#### Rewrite Report Modal
+
+**Component:** [src/components/ReportRewriteModal.jsx](src/components/ReportRewriteModal.jsx)
+
+**Appearance:**
+- Width: 600px
+- Modal overlay: `bg-black bg-opacity-20`
+- Title: "Rewrite Report"
+- Subtitle: "Positronic will reorganize and restyle your report based on your objectives"
+
+**Form Fields:**
+
+1. **Report Objective (textarea)**
+   - Label: "What is the purpose of this report?"
+   - Placeholder: "e.g., Executive summary for stakeholders, Technical analysis for data scientists"
+   - Rows: 3
+   - Required field (shows error if empty)
+   - Focus ring: `#3686c1` (matches Snowflake modal)
+
+2. **Writing Style (select dropdown)**
+   - Label: "Writing Style"
+   - Default: "Formal & Technical"
+   - Options:
+     - **Formal & Technical**: Precise terminology, statistical language, objective tone
+     - **Formal & Accessible**: Professional language without jargon, clear explanations
+     - **Casual & Technical**: Conversational tone with technical accuracy
+     - **Casual & Accessible**: Simple everyday language, big picture focus
+     - **Brief & Focused**: 1-2 sentences per output, essential information only
+     - **Detailed & Comprehensive**: 3-4 sentences per output with context
+   - Focus ring: `#3686c1`
+
+3. **Action Buttons**
+   - **Cancel**: White background, gray border, matches Snowflake modal
+   - **Rewrite Report**: `#3686c1` background, hover `#2a6a9a`
+   - Processing state: Shows spinner + "Rewriting..." text
+
+**Keyboard Shortcuts:**
+- ESC: Close modal (when not processing)
+- Enter: Submit form (future enhancement)
+
+### Technical Implementation
+
+#### State Variables ([App.jsx:82-87](src/App.jsx#L82-L87))
+
+```javascript
+const [showRewriteModal, setShowRewriteModal] = useState(false);
+const [isRewriteProcessing, setIsRewriteProcessing] = useState(false);
+const [reportHistory, setReportHistory] = useState([]);
+const [reportRedoStack, setReportRedoStack] = useState([]);
+const [lastRewriteObjective, setLastRewriteObjective] = useState('');
+const [lastRewriteStyle, setLastRewriteStyle] = useState('');
+```
+
+#### History Entry Structure
+
+Each snapshot in `reportHistory` contains:
+```javascript
+{
+  timestamp: number,
+  reportTitle: string,
+  reportDescription: string,
+  favoritedCardIds: string[],  // Array preserves order
+  favoritedOutputDescriptions: { [cardId]: string },
+  favoritedOutputHeadings: { [cardId]: string }
+}
+```
+
+#### Core Functions
+
+1. **createReportSnapshot()** - Captures current report state for undo
+2. **applyRewrittenReport(rewrittenReport)** - Applies Claude's rewritten content atomically
+3. **handleUndoRewrite()** - Restores previous state from history
+4. **handleRedoRewrite()** - Reapplies undone rewrite
+5. **handleRewriteReport(objective, style)** - Main rewrite handler, calls Claude API
+6. **buildRewritePrompt(payload)** - Constructs specialized prompt for Claude
+7. **validateRewriteResponse(response, originalCardIds)** - Validates Claude's JSON response
+
+#### API Flow
+
+```
+User clicks "Rewrite Report" →
+  Opens ReportRewriteModal →
+  User enters objective + selects style →
+  handleRewriteReport() saves snapshot to history →
+  Calls /api/chat with buildRewritePrompt() →
+  Claude returns JSON with rewritten content →
+  validateRewriteResponse() checks all cardIds present →
+  applyRewrittenReport() updates state atomically →
+  Saves objective + style to lastRewriteObjective/Style →
+  Modal closes
+```
+
+#### Prompt Engineering
+
+The system sends Claude a detailed prompt including:
+- Report objective (user-specified)
+- Writing style with detailed guidelines
+- Current report title and description
+- All favorited outputs with:
+  - Current descriptions
+  - Code context (first 200 chars)
+  - Output types (plot, text, error)
+
+Claude responds with JSON:
+```json
+{
+  "title": "Rewritten report title (3-9 words)",
+  "description": "Rewritten report description (2-4 sentences)",
+  "outputs": [
+    {
+      "cardId": "exact-id-from-input",
+      "heading": "Section heading (4-8 words)",
+      "description": "Rewritten description"
+    }
+  ]
+}
+```
+
+#### Validation Rules
+
+- All original cardIds must be present in response
+- No duplicate cardIds
+- No unknown cardIds
+- Each output must have both `heading` and `description`
+- Title and description must be strings
+
+If validation fails, the entire rewrite is rejected with an error message.
+
+### Section Headings
+
+**Important:** Section headings are **only generated during Report Rewrite**. When users initially favorite outputs (star icon), only descriptions are generated.
+
+**Rendering** ([App.jsx:~2880](src/App.jsx#L~2880)):
+```jsx
+{Array.from(favoritedCardIds).map(cardId => {
+  const card = codeCards.find(c => c.id === cardId);
+  const heading = favoritedOutputHeadings[cardId];  // May be undefined
+  const description = favoritedOutputDescriptions[cardId];
+
+  return (
+    <div key={cardId} className="mb-8 pb-8 border-b border-gray-200 last:border-b-0">
+      {/* Section heading - only shown if exists */}
+      {heading && (
+        <h3 className="text-lg font-semibold text-gray-900 mb-3">
+          {heading}
+        </h3>
+      )}
+
+      {/* Description paragraph */}
+      {description && (
+        <p className="text-sm text-gray-700 mb-4 leading-relaxed">
+          {description}
+        </p>
+      )}
+
+      {/* Output rendering */}
+      ...
+    </div>
+  );
+})}
+```
+
+**Visual Hierarchy:**
+```
+Report Title (text-2xl font-semibold) - Largest
+  Report Description (text-sm) - Context
+    Section Heading (text-lg font-semibold) - NEW!
+      Output Description (text-sm) - Details
+      Output (plot/table/text) - Visual
+```
+
+### Smart Re-Favoriting
+
+When a user unfavorites an output after a rewrite, then favorites it again, the system intelligently generates a description that matches the report's current writing style.
+
+**How it works:**
+
+1. **Context Preservation**: `lastRewriteObjective` and `lastRewriteStyle` are saved after each rewrite
+2. **Smart Generation**: When favoriting an output, `generateFavoritedDescription()` checks if rewrite context exists
+3. **Style Matching**: If context exists, generates description using the same objective and style guidelines
+4. **Consistency**: Ensures newly added outputs match the rest of the rewritten report
+
+**Implementation** ([App.jsx:1583-1670](src/App.jsx#L1583-L1670)):
+```javascript
+const generateFavoritedDescription = async (cardId) => {
+  if (lastRewriteObjective && lastRewriteStyle) {
+    // Match the rewritten report style
+    prompt = `You are writing a description for a data analysis report with:
+
+    REPORT OBJECTIVE: ${lastRewriteObjective}
+    WRITING STYLE: ${lastRewriteStyle}
+    ...match the style and objective above...`;
+  } else {
+    // Default prompt (no rewrite context)
+    prompt = `...standard description prompt...`;
+  }
+  // Call Claude API...
+};
+```
+
+### Undo/Redo Behavior
+
+**Undo:**
+- Saves current state to redo stack before undoing
+- Restores previous state from history
+- Removes entry from history
+- Limit: Last 5 undo operations
+
+**Redo:**
+- Restores state from redo stack
+- Saves current state to history
+- Removes entry from redo stack
+- Limit: Last 5 redo operations
+
+**Clearing Redo Stack:**
+- Cleared when a new rewrite is performed (creates new timeline branch)
+- Cleared on new conversation
+
+**New Conversation:**
+- Clears both history and redo stacks
+- Resets `lastRewriteObjective` and `lastRewriteStyle`
+
+### Persistence
+
+The rewrite feature integrates with 3Panel's conversation persistence system:
+
+**Persisted State** ([src/utils/persistence.js](src/utils/persistence.js)):
+- `favoritedOutputHeadings`: `{}`
+- `reportHistory`: `[]`
+- `reportRedoStack`: `[]`
+- `lastRewriteObjective`: `''`
+- `lastRewriteStyle`: `''`
+
+**Benefits:**
+- Undo/redo history survives page reloads
+- Section headings preserved across sessions
+- Rewrite context maintained for future favoriting
+- Complete report state restored
+
+### Error Handling
+
+**User-Facing Errors:**
+- Empty objective: Red border + "Please enter a report objective"
+- API error: Alert with error message + suggestion to try again
+- Invalid JSON: "Claude did not return valid JSON"
+- Validation failure: Alert with specific error (e.g., "Missing cardId: card-123")
+
+**Graceful Degradation:**
+- If Claude's response is invalid, report remains unchanged
+- No partial updates - atomic state changes only
+- Undo history preserved even if rewrite fails
+
+### Code Locations
+
+**Files Created:**
+- [src/components/ReportRewriteModal.jsx](src/components/ReportRewriteModal.jsx) - Modal component
+
+**Files Modified:**
+- [src/App.jsx](src/App.jsx) - State, handlers, toolbar buttons, rendering
+- [src/utils/persistence.js](src/utils/persistence.js) - Default state, validation
+
+**Key Sections:**
+- State: Lines 82-87
+- Modal: Lines ~2900 (render)
+- Toolbar: Lines 2533-2577
+- Handlers: Lines ~1680-2040
+- Rendering: Lines ~2880 (section headings)
+- Persistence: Lines 122-280
+
+### Future Enhancements
+
+- **Preview Mode**: Show side-by-side before/after comparison
+- **Partial Rewrite**: Select specific outputs to rewrite
+- **Custom Style Presets**: Save user-defined style templates
+- **Output Pinning**: Fix certain outputs in place during reordering
+- **Unlimited Undo/Redo**: Full history navigation
+- **Export Style Matching**: Apply report style to exported HTML/PDF
 
 ---
 

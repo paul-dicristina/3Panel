@@ -58,12 +58,12 @@ const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing }) => {
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-20 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-[500px]">
+      <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-[600px]">
         <h2 className="text-2xl font-bold mb-2 text-gray-800">
           Rewrite Report
         </h2>
         <p className="text-gray-600 mb-6 text-sm">
-          Claude will reorganize and restyle your report based on your objective
+          Positronic will reorganize and restyle your report based on your objectives
         </p>
 
         {/* Report Objective */}
@@ -81,7 +81,7 @@ const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing }) => {
             }}
             placeholder="e.g., Executive summary for stakeholders, Technical analysis for data scientists"
             rows={3}
-            className={`w-full px-4 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none ${
+            className={`w-full px-4 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3686c1] resize-none ${
               showError ? 'border-red-500' : 'border-gray-300'
             }`}
             disabled={isProcessing}
@@ -102,7 +102,7 @@ const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing }) => {
           <select
             value={style}
             onChange={(e) => setStyle(e.target.value)}
-            className="w-full pl-4 pr-8 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-no-repeat"
+            className="w-full pl-4 pr-8 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3686c1] appearance-none bg-no-repeat"
             style={{
               backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23374151'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
               backgroundPosition: 'right 0.5rem center',
@@ -124,14 +124,14 @@ const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing }) => {
           <button
             onClick={handleCancel}
             disabled={isProcessing}
-            className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-24 h-8 px-4 bg-white border border-gray-300 rounded-md hover:bg-gray-100 flex items-center justify-center text-sm disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Cancel
           </button>
           <button
             onClick={handleSubmit}
             disabled={isProcessing}
-            className="px-4 py-2 text-sm bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+            className="px-4 h-8 text-sm bg-[#3686c1] text-white font-medium rounded-md hover:bg-[#2a6a9a] disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           >
             {isProcessing ? (
               <>

@@ -83,6 +83,8 @@ function App() {
   const [isRewriteProcessing, setIsRewriteProcessing] = useState(false);
   const [reportHistory, setReportHistory] = useState([]);
   const [reportRedoStack, setReportRedoStack] = useState([]);
+  const [lastRewriteObjective, setLastRewriteObjective] = useState('');
+  const [lastRewriteStyle, setLastRewriteStyle] = useState('');
 
   const [isSubmitAnimating, setIsSubmitAnimating] = useState(false);
   const [expandedSuggestions, setExpandedSuggestions] = useState(new Set()); // Track which message IDs have expanded suggestions
@@ -133,6 +135,8 @@ function App() {
           favoritedOutputHeadings,
           reportHistory,
           reportRedoStack,
+          lastRewriteObjective,
+          lastRewriteStyle,
           datasetRegistry,
           viewMode,
           selectedCardId,
@@ -186,6 +190,8 @@ function App() {
       reportDescription,
       favoritedCardIds: Array.from(favoritedCardIds),
       favoritedOutputDescriptions,
+      lastRewriteObjective,
+      lastRewriteStyle,
       datasetRegistry,
       viewMode,
       selectedCardId
@@ -252,6 +258,8 @@ function App() {
       setFavoritedOutputHeadings(typeof state.favoritedOutputHeadings === 'object' ? state.favoritedOutputHeadings : {});
       setReportHistory(Array.isArray(state.reportHistory) ? state.reportHistory : []);
       setReportRedoStack(Array.isArray(state.reportRedoStack) ? state.reportRedoStack : []);
+      setLastRewriteObjective(typeof state.lastRewriteObjective === 'string' ? state.lastRewriteObjective : '');
+      setLastRewriteStyle(typeof state.lastRewriteStyle === 'string' ? state.lastRewriteStyle : '');
       setDatasetRegistry(typeof state.datasetRegistry === 'object' ? state.datasetRegistry : { activeDataset: null, datasets: {} });
       setViewMode(typeof state.viewMode === 'string' ? state.viewMode : 'explore');
       setSelectedCardId(state.selectedCardId || null);
@@ -569,6 +577,8 @@ function App() {
     favoritedOutputHeadings,
     reportHistory,
     reportRedoStack,
+    lastRewriteObjective,
+    lastRewriteStyle,
     datasetRegistry,
     viewMode,
     selectedCardId
@@ -1207,6 +1217,8 @@ Please respond with a JSON object in this format:
     setFavoritedOutputHeadings({});
     setReportHistory([]);
     setReportRedoStack([]);
+    setLastRewriteObjective('');
+    setLastRewriteStyle('');
 
     // Clear persisted state from localStorage
     clearConversationState();
@@ -1584,7 +1596,38 @@ Please respond with a JSON object in this format:
 
     try {
       // Create a prompt to generate a short description
-      const prompt = `You are analyzing R code output for a data analysis report.
+      // If we have rewrite context, match that style; otherwise, use default
+      let prompt;
+
+      if (lastRewriteObjective && lastRewriteStyle) {
+        // Match the rewritten report style
+        const styleGuidelines = {
+          'Formal & Technical': 'Use precise technical terminology and statistical language. Include specific metrics. Maintain objective, academic tone.',
+          'Formal & Accessible': 'Use clear, professional language without heavy jargon. Explain technical concepts in understandable terms. Maintain professional tone.',
+          'Casual & Technical': 'Use conversational tone with technical accuracy. Include technical details but in friendly language.',
+          'Casual & Accessible': 'Use simple, everyday language. Focus on big picture insights. Conversational and engaging tone.',
+          'Brief & Focused': 'Extremely concise (1-2 sentences). Only essential information.',
+          'Detailed & Comprehensive': 'Thorough explanations (3-4 sentences). Include context and implications.'
+        };
+
+        prompt = `You are writing a description for a data analysis report with the following context:
+
+REPORT OBJECTIVE: ${lastRewriteObjective}
+
+WRITING STYLE: ${lastRewriteStyle}
+${styleGuidelines[lastRewriteStyle] || styleGuidelines['Formal & Technical']}
+
+The R code executed was:
+\`\`\`r
+${card.code}
+\`\`\`
+
+Please write a concise description of what this output shows, matching the writing style and report objective above. Focus on the key findings or insights, not the technical details of how it was generated.
+
+${lastRewriteStyle === 'Brief & Focused' ? 'Keep it to 1-2 sentences.' : lastRewriteStyle === 'Detailed & Comprehensive' ? 'Write 3-4 sentences with thorough context.' : 'Write 2-3 sentences.'}`;
+      } else {
+        // Default prompt (no rewrite context)
+        prompt = `You are analyzing R code output for a data analysis report.
 
 The R code executed was:
 \`\`\`r
@@ -1594,6 +1637,7 @@ ${card.code}
 Please write a single, concise paragraph (2-3 sentences) describing what this output shows. Focus on the key findings or insights, not the technical details of how it was generated.
 
 Keep it professional and suitable for a data analysis report.`;
+      }
 
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -1655,11 +1699,16 @@ Keep it professional and suitable for a data analysis report.`;
       });
 
       if (wasFavorited) {
-        // Remove description when unfavoriting
+        // Remove description and heading when unfavoriting
         setFavoritedOutputDescriptions(prev => {
           const newDescriptions = { ...prev };
           delete newDescriptions[selectedCardId];
           return newDescriptions;
+        });
+        setFavoritedOutputHeadings(prev => {
+          const newHeadings = { ...prev };
+          delete newHeadings[selectedCardId];
+          return newHeadings;
         });
       } else {
         // Generate description when favoriting
@@ -1984,6 +2033,10 @@ Respond with ONLY a JSON code block in this format:
 
       // Apply changes atomically
       applyRewrittenReport(rewrittenReport);
+
+      // Save objective and style for future description generation
+      setLastRewriteObjective(objective);
+      setLastRewriteStyle(style);
 
       setShowRewriteModal(false);
 
@@ -2547,28 +2600,33 @@ Respond with ONLY a JSON code block in this format:
               </button>
             )}
 
-            {/* Undo - only visible in Report mode when history exists */}
-            {viewMode === 'report' && reportHistory.length > 0 && (
+            {/* Undo - always visible in Report mode */}
+            {viewMode === 'report' && (
               <button
                 onClick={handleUndoRewrite}
-                className="flex items-center gap-1 hover:bg-gray-200 rounded transition-colors px-1"
-                title="Undo last rewrite"
+                className="flex items-center gap-1 hover:bg-gray-200 rounded transition-colors px-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={reportHistory.length === 0}
+                title={reportHistory.length === 0 ? "No rewrites to undo" : "Undo last rewrite"}
               >
                 <img src="/undo.png" alt="Undo" className="h-4" />
-                <span className="text-[12px] font-medium text-gray-700">Undo</span>
               </button>
             )}
 
-            {/* Redo - only visible in Report mode when redo stack exists */}
-            {viewMode === 'report' && reportRedoStack.length > 0 && (
+            {/* Redo - always visible in Report mode */}
+            {viewMode === 'report' && (
               <button
                 onClick={handleRedoRewrite}
-                className="flex items-center gap-1 hover:bg-gray-200 rounded transition-colors px-1"
-                title="Redo last undone rewrite"
+                className="flex items-center gap-1 hover:bg-gray-200 rounded transition-colors px-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={reportRedoStack.length === 0}
+                title={reportRedoStack.length === 0 ? "No rewrites to redo" : "Redo last undone rewrite"}
               >
                 <img src="/redo.png" alt="Redo" className="h-4" />
-                <span className="text-[12px] font-medium text-gray-700">Redo</span>
               </button>
+            )}
+
+            {/* Separator before Export Report */}
+            {viewMode === 'report' && (
+              <div className="h-4 w-px bg-gray-300 mx-1"></div>
             )}
 
             {/* Export Report - only visible in Report mode */}

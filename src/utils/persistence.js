@@ -125,6 +125,8 @@ export function validateState(state) {
   if (state.favoritedOutputHeadings !== undefined && typeof state.favoritedOutputHeadings !== 'object') return false;
   if (state.reportHistory !== undefined && !Array.isArray(state.reportHistory)) return false;
   if (state.reportRedoStack !== undefined && !Array.isArray(state.reportRedoStack)) return false;
+  if (state.lastRewriteObjective !== undefined && typeof state.lastRewriteObjective !== 'string') return false;
+  if (state.lastRewriteStyle !== undefined && typeof state.lastRewriteStyle !== 'string') return false;
   if (state.datasetRegistry !== undefined && typeof state.datasetRegistry !== 'object') return false;
   if (state.viewMode !== undefined && typeof state.viewMode !== 'string') return false;
   if (state.expandedSuggestions !== undefined && !Array.isArray(state.expandedSuggestions)) return false;
@@ -148,6 +150,8 @@ export function getDefaultState() {
     favoritedOutputHeadings: {},
     reportHistory: [],
     reportRedoStack: [],
+    lastRewriteObjective: '',
+    lastRewriteStyle: '',
     datasetRegistry: { activeDataset: null, datasets: {} },
     viewMode: 'explore',
     selectedCardId: null,
