@@ -6,11 +6,25 @@ import React, { useState, useEffect } from 'react';
  * Modal dialog for capturing user preferences for report rewriting
  * Allows users to specify the report objective and writing style
  */
-const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing }) => {
+const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing, persistedCustomStyle, onCustomStyleChange, persistedObjective, onObjectiveChange }) => {
   const [objective, setObjective] = useState('');
   const [style, setStyle] = useState('Formal & Technical');
   const [customStyle, setCustomStyle] = useState('');
   const [showError, setShowError] = useState(false);
+
+  // Initialize customStyle from persisted value when modal opens
+  useEffect(() => {
+    if (isOpen && persistedCustomStyle) {
+      setCustomStyle(persistedCustomStyle);
+    }
+  }, [isOpen, persistedCustomStyle]);
+
+  // Initialize objective from persisted value when modal opens
+  useEffect(() => {
+    if (isOpen && persistedObjective) {
+      setObjective(persistedObjective);
+    }
+  }, [isOpen, persistedObjective]);
 
   const styleOptions = [
     'Formal & Technical',
@@ -57,16 +71,12 @@ const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing }) => {
     const finalStyle = style === 'Custom' ? customStyle.trim() : style;
     await onRewrite(trimmedObjective, finalStyle);
 
-    // Reset form
-    setObjective('');
+    // Reset form (but don't clear objective or customStyle - they're persisted)
     setStyle('Formal & Technical');
-    setCustomStyle('');
   };
 
   const handleCancel = () => {
-    setObjective('');
     setStyle('Formal & Technical');
-    setCustomStyle('');
     setShowError(false);
     onCancel();
   };
@@ -89,8 +99,10 @@ const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing }) => {
           <textarea
             value={objective}
             onChange={(e) => {
-              setObjective(e.target.value);
-              if (showError && e.target.value.trim()) {
+              const newValue = e.target.value;
+              setObjective(newValue);
+              onObjectiveChange(newValue);
+              if (showError && newValue.trim()) {
                 setShowError(false);
               }
             }}
@@ -139,7 +151,11 @@ const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing }) => {
           {style === 'Custom' && (
             <textarea
               value={customStyle}
-              onChange={(e) => setCustomStyle(e.target.value)}
+              onChange={(e) => {
+                const newValue = e.target.value;
+                setCustomStyle(newValue);
+                onCustomStyleChange(newValue);
+              }}
               placeholder=""
               rows={6}
               disabled={isProcessing}

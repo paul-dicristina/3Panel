@@ -85,6 +85,8 @@ function App() {
   const [reportRedoStack, setReportRedoStack] = useState([]);
   const [lastRewriteObjective, setLastRewriteObjective] = useState('');
   const [lastRewriteStyle, setLastRewriteStyle] = useState('');
+  const [persistedCustomStyle, setPersistedCustomStyle] = useState('');
+  const [persistedObjective, setPersistedObjective] = useState('');
 
   const [isSubmitAnimating, setIsSubmitAnimating] = useState(false);
   const [expandedSuggestions, setExpandedSuggestions] = useState(new Set()); // Track which message IDs have expanded suggestions
@@ -1219,6 +1221,8 @@ Please respond with a JSON object in this format:
     setReportRedoStack([]);
     setLastRewriteObjective('');
     setLastRewriteStyle('');
+    setPersistedCustomStyle('');
+    setPersistedObjective('');
 
     // Clear persisted state from localStorage
     clearConversationState();
@@ -3045,6 +3049,10 @@ Respond with ONLY a JSON code block in this format:
         onRewrite={handleRewriteReport}
         onCancel={() => setShowRewriteModal(false)}
         isProcessing={isRewriteProcessing}
+        persistedCustomStyle={persistedCustomStyle}
+        onCustomStyleChange={setPersistedCustomStyle}
+        persistedObjective={persistedObjective}
+        onObjectiveChange={setPersistedObjective}
       />
     </div>
   );
