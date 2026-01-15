@@ -9,8 +9,8 @@ import React, { useState, useEffect } from 'react';
 const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing }) => {
   const [objective, setObjective] = useState('');
   const [style, setStyle] = useState('Formal & Technical');
+  const [customStyle, setCustomStyle] = useState('');
   const [showError, setShowError] = useState(false);
-  const [focusedIndex, setFocusedIndex] = useState(null);
 
   const styleOptions = [
     'Formal & Technical',
@@ -18,52 +18,17 @@ const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing }) => {
     'Brief & Focused',
     'Formal & Accessible',
     'Casual & Accessible',
-    'Detailed & Thorough'
+    'Detailed & Thorough',
+    'Custom'
   ];
 
-  // Handle keyboard navigation for style selector
+  // Handle ESC key to close modal
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (!isOpen || isProcessing) return;
 
-      // ESC to close modal
       if (event.key === 'Escape') {
-        setObjective('');
-        setStyle('Formal & Technical');
-        setShowError(false);
-        setFocusedIndex(null);
-        onCancel();
-        return;
-      }
-
-      // Only handle arrow keys and Enter/Space if a style button has focus
-      if (focusedIndex === null) return;
-
-      const gridCols = 3;
-      const totalOptions = styleOptions.length;
-
-      switch (event.key) {
-        case 'ArrowRight':
-          event.preventDefault();
-          setFocusedIndex((focusedIndex + 1) % totalOptions);
-          break;
-        case 'ArrowLeft':
-          event.preventDefault();
-          setFocusedIndex((focusedIndex - 1 + totalOptions) % totalOptions);
-          break;
-        case 'ArrowDown':
-          event.preventDefault();
-          setFocusedIndex((focusedIndex + gridCols) % totalOptions);
-          break;
-        case 'ArrowUp':
-          event.preventDefault();
-          setFocusedIndex((focusedIndex - gridCols + totalOptions) % totalOptions);
-          break;
-        case 'Enter':
-        case ' ':
-          event.preventDefault();
-          setStyle(styleOptions[focusedIndex]);
-          break;
+        handleCancel();
       }
     };
 
@@ -74,7 +39,7 @@ const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing }) => {
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isOpen, isProcessing, focusedIndex, onCancel, styleOptions]);
+  }, [isOpen, isProcessing]);
 
   if (!isOpen) return null;
 
@@ -87,16 +52,21 @@ const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing }) => {
     }
 
     setShowError(false);
-    await onRewrite(trimmedObjective, style);
+
+    // Use customStyle if Custom is selected, otherwise use the selected style
+    const finalStyle = style === 'Custom' ? customStyle.trim() : style;
+    await onRewrite(trimmedObjective, finalStyle);
 
     // Reset form
     setObjective('');
     setStyle('Formal & Technical');
+    setCustomStyle('');
   };
 
   const handleCancel = () => {
     setObjective('');
     setStyle('Formal & Technical');
+    setCustomStyle('');
     setShowError(false);
     onCancel();
   };
@@ -144,41 +114,38 @@ const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing }) => {
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Writing Style
           </label>
-          <div className="border border-gray-300 rounded-lg overflow-hidden">
-            <div className="grid grid-cols-3">
-              {styleOptions.map((option, index) => (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() => {
-                    setStyle(option);
-                    setFocusedIndex(index);
-                  }}
-                  onFocus={() => setFocusedIndex(index)}
-                  onBlur={() => setFocusedIndex(null)}
-                  disabled={isProcessing}
-                  className={`
-                    text-[13px] py-3 px-4
-                    ${index < 3 ? 'border-b border-gray-300' : ''}
-                    ${index % 3 !== 2 ? 'border-r border-gray-300' : ''}
-                    ${style === option
-                      ? 'bg-[#3686c1] text-white font-bold'
-                      : 'bg-white text-gray-700 hover:bg-gray-50'
-                    }
-                    ${focusedIndex === index && style !== option
-                      ? 'ring-2 ring-inset ring-[#3686c1]'
-                      : ''
-                    }
-                    disabled:opacity-50 disabled:cursor-not-allowed
-                    transition-colors
-                    focus:outline-none
-                  `}
-                >
+          <div className="relative">
+            <select
+              value={style}
+              onChange={(e) => setStyle(e.target.value)}
+              disabled={isProcessing}
+              className="w-full px-4 py-2 pr-10 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3686c1] disabled:opacity-50 disabled:cursor-not-allowed appearance-none"
+            >
+              {styleOptions.map((option) => (
+                <option key={option} value={option}>
                   {option}
-                </button>
+                </option>
               ))}
+            </select>
+            {/* Custom chevron icon */}
+            <div className="absolute inset-y-0 right-[8px] flex items-center pointer-events-none">
+              <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
             </div>
           </div>
+
+          {/* Custom Style Input - shown only when Custom is selected */}
+          {style === 'Custom' && (
+            <textarea
+              value={customStyle}
+              onChange={(e) => setCustomStyle(e.target.value)}
+              placeholder=""
+              rows={6}
+              disabled={isProcessing}
+              className="mt-3 w-full px-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3686c1] resize-none disabled:opacity-50 disabled:cursor-not-allowed"
+            />
+          )}
         </div>
 
         {/* Action Buttons */}
