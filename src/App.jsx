@@ -88,6 +88,9 @@ function App() {
   const [persistedCustomStyle, setPersistedCustomStyle] = useState('');
   const [persistedObjective, setPersistedObjective] = useState('');
 
+  // Export format state
+  const [exportFormat, setExportFormat] = useState('html');
+
   const [isSubmitAnimating, setIsSubmitAnimating] = useState(false);
   const [expandedSuggestions, setExpandedSuggestions] = useState(new Set()); // Track which message IDs have expanded suggestions
   const [isRecording, setIsRecording] = useState(false);
@@ -620,12 +623,15 @@ function App() {
   };
 
   // Handle Quarto report creation
-  const handleCreateReport = async () => {
-    console.log('=== REPORT GENERATION START ===');
+  const handleExportReport = async (format) => {
+    console.log('=== REPORT EXPORT START ===', format);
 
-    // Open a blank window immediately to avoid popup blockers
+    // For Quarto and Jupyter, trigger download instead of opening window
+    const shouldDownload = format === 'quarto' || format === 'jupyter';
+
+    // Open a blank window immediately to avoid popup blockers (only for HTML/PDF)
     // This must happen synchronously in the click handler
-    const reportWindow = window.open('about:blank', '_blank');
+    const reportWindow = !shouldDownload ? window.open('about:blank', '_blank') : null;
     if (reportWindow) {
       reportWindow.document.write(`<html>
 <head>
@@ -717,48 +723,98 @@ Please respond with a JSON object in this format:
         console.log('Using fallback descriptions:', descriptions.length);
       }
 
-      console.log('Step 3: Generating report data...');
-      // Generate report data from conversation and favorited outputs
-      const reportData = generateQuartoReport(messages, codeCards, favoritedCardIds, descriptions);
-      console.log('Report data generated:', {
-        title: reportData.title,
-        findingsCount: reportData.findings.length,
-        hasFindings: reportData.findings.length > 0
+      console.log('Step 3: Preparing export data...');
+
+      let endpoint;
+      let exportData;
+
+      if (format === 'html' || format === 'pdf') {
+        // Use existing HTML/Quarto export
+        endpoint = '/api/create-quarto-report';
+        exportData = generateQuartoReport(messages, codeCards, favoritedCardIds, descriptions);
+      } else if (format === 'quarto' || format === 'jupyter') {
+        // Use new export endpoints with full code
+        endpoint = format === 'quarto' ? '/api/export-quarto' : '/api/export-jupyter';
+
+        // Build findings array with cardIds, headings, and descriptions
+        const orderedCardIds = Array.from(favoritedCardIds);
+        const findings = orderedCardIds.map((cardId, idx) => ({
+          cardId: cardId,
+          heading: favoritedOutputHeadings[cardId] || null,
+          description: favoritedOutputDescriptions[cardId] || descriptions[idx] || ''
+        }));
+
+        exportData = {
+          title: reportTitle || 'Data Analysis Report',
+          date: new Date().toLocaleDateString(),
+          findings: findings,
+          codeCards: codeCards,
+          datasetRegistry: datasetRegistry
+        };
+      }
+
+      console.log('Export data prepared:', {
+        format,
+        endpoint,
+        dataKeys: Object.keys(exportData)
       });
 
       console.log('Step 4: Sending to backend...');
       // Send to backend to render
-      const response = await fetch('/api/create-quarto-report', {
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(reportData)
+        body: JSON.stringify(exportData)
       });
 
       console.log('Backend response status:', response.status);
       if (!response.ok) {
         const errorText = await response.text();
         console.error('Backend error response:', errorText);
-        throw new Error(`Failed to create report: ${response.status} ${errorText}`);
+        throw new Error(`Failed to export report: ${response.status} ${errorText}`);
       }
 
       const result = await response.json();
       console.log('Backend result:', result);
 
-      console.log('Step 5: Opening report...');
-      // Navigate the pre-opened window to the report URL
-      if (result.htmlPath && reportWindow) {
-        const reportUrl = `http://localhost:3001/reports/${result.htmlFilename}`;
-        console.log('Opening report URL:', reportUrl);
-        reportWindow.location.href = reportUrl;
-        console.log('=== REPORT GENERATION SUCCESS ===');
-      } else if (!reportWindow) {
-        console.error('Report window was blocked by popup blocker');
-        alert(`Report generated successfully! Please enable popups or open manually:\nhttp://localhost:3001/reports/${result.htmlFilename}`);
+      console.log('Step 5: Handling export result...');
+
+      if (format === 'quarto' || format === 'jupyter') {
+        // Trigger download
+        const downloadUrl = `http://localhost:3001${result.downloadUrl}`;
+        console.log('Triggering download:', downloadUrl);
+        window.location.href = downloadUrl;
+        console.log('=== EXPORT SUCCESS ===');
+      } else if (format === 'pdf') {
+        // Open HTML and let user print to PDF
+        if (result.htmlPath && reportWindow) {
+          const reportUrl = `http://localhost:3001/reports/${result.htmlFilename}`;
+          console.log('Opening report for PDF print:', reportUrl);
+          reportWindow.location.href = reportUrl;
+          // Show print dialog after a short delay
+          setTimeout(() => {
+            if (reportWindow && !reportWindow.closed) {
+              reportWindow.print();
+            }
+          }, 1000);
+          console.log('=== REPORT OPENED FOR PDF PRINT ===');
+        }
       } else {
-        console.error('No htmlPath in result');
-        if (reportWindow) reportWindow.close();
+        // HTML format - open in new window
+        if (result.htmlPath && reportWindow) {
+          const reportUrl = `http://localhost:3001/reports/${result.htmlFilename}`;
+          console.log('Opening report URL:', reportUrl);
+          reportWindow.location.href = reportUrl;
+          console.log('=== REPORT GENERATION SUCCESS ===');
+        } else if (!reportWindow) {
+          console.error('Report window was blocked by popup blocker');
+          alert(`Report generated successfully! Please enable popups or open manually:\nhttp://localhost:3001/reports/${result.htmlFilename}`);
+        } else {
+          console.error('No htmlPath in result');
+          if (reportWindow) reportWindow.close();
+        }
       }
     } catch (error) {
       console.error('=== REPORT GENERATION FAILED ===');
@@ -2635,15 +2691,32 @@ Respond with ONLY a JSON code block in this format:
 
             {/* Export Report - only visible in Report mode */}
             {viewMode === 'report' && (
-              <button
-                onClick={handleCreateReport}
-                className="flex items-center gap-1 hover:bg-gray-200 rounded transition-colors px-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={favoritedCardIds.size === 0}
-                title={favoritedCardIds.size === 0 ? "Add outputs to favorites to export report" : "Export report from conversation"}
-              >
-                <img src="/report.png" alt="Export Report" className="h-4" />
-                <span className="text-[12px] font-medium text-gray-700">Export Report</span>
-              </button>
+              <div className="flex items-center gap-2">
+                {/* Format selector */}
+                <select
+                  value={exportFormat}
+                  onChange={(e) => setExportFormat(e.target.value)}
+                  className="text-[11px] border border-gray-300 rounded px-2 py-1 h-6 disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={favoritedCardIds.size === 0}
+                  title="Export format"
+                >
+                  <option value="html">HTML</option>
+                  <option value="quarto">Quarto (.qmd)</option>
+                  <option value="jupyter">Jupyter (.ipynb)</option>
+                  <option value="pdf">PDF</option>
+                </select>
+
+                {/* Export button */}
+                <button
+                  onClick={() => handleExportReport(exportFormat)}
+                  className="flex items-center gap-1 hover:bg-gray-200 rounded transition-colors px-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={favoritedCardIds.size === 0}
+                  title={favoritedCardIds.size === 0 ? "Add outputs to favorites to export report" : "Export report from conversation"}
+                >
+                  <img src="/report.png" alt="Export Report" className="h-4" />
+                  <span className="text-[12px] font-medium text-gray-700">Export Report</span>
+                </button>
+              </div>
             )}
 
             {/* Output panel toolbar icons - only visible in Explore mode */}

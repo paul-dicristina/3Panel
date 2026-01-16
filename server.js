@@ -3416,6 +3416,104 @@ app.post('/api/clear-workspace', async (req, res) => {
 });
 
 /**
+ * Helper: Build complete code chain for reproducibility
+ * Includes all code executed before and including favorited outputs
+ * @param {Array} favoritedCardIds - Array of favorited card IDs
+ * @param {Array} allCodeCards - All code cards in execution order
+ * @returns {Array} Ordered array of code cards needed for reproducibility
+ */
+function buildCodeChain(favoritedCardIds, allCodeCards) {
+  const orderedCards = [];
+  const seenIds = new Set();
+
+  favoritedCardIds.forEach(cardId => {
+    const cardIndex = allCodeCards.findIndex(c => c.id === cardId);
+    if (cardIndex >= 0) {
+      // Include all code up to and including this card
+      for (let i = 0; i <= cardIndex; i++) {
+        if (!seenIds.has(allCodeCards[i].id)) {
+          orderedCards.push(allCodeCards[i]);
+          seenIds.add(allCodeCards[i].id);
+        }
+      }
+    }
+  });
+
+  return orderedCards;
+}
+
+/**
+ * Helper: Generate dataset loading code from dataset registry
+ * @param {Object} datasets - Dataset registry datasets object
+ * @returns {string} R code to load datasets
+ */
+function generateDatasetLoadCode(datasets) {
+  const loadCode = [];
+
+  for (const [name, dataset] of Object.entries(datasets)) {
+    if (dataset.source === 'csv' && dataset.filename) {
+      loadCode.push(`# Load CSV file (ensure ${dataset.filename} is in working directory)`);
+      loadCode.push(`${name} <- read.csv("${dataset.filename}")`);
+      loadCode.push('');
+    } else if (dataset.source === 'snowflake' && dataset.fullTableName) {
+      loadCode.push(`# Load Snowflake table: ${dataset.fullTableName}`);
+      loadCode.push(`# Note: Requires Snowflake connection (see connection code in setup)`);
+      loadCode.push(`# ${name} <- dbGetQuery(conn, "SELECT * FROM ${dataset.fullTableName} LIMIT 1000")`);
+      loadCode.push('');
+    }
+  }
+
+  return loadCode.join('\n');
+}
+
+/**
+ * Helper: Build complete reproducible R script
+ * @param {Object} datasetRegistry - Full dataset registry
+ * @param {Array} codeChain - Ordered array of code cards
+ * @returns {string} Complete R script
+ */
+function buildReproducibleScript(datasetRegistry, codeChain) {
+  const parts = [];
+
+  // 1. Library loading
+  parts.push(`# Load required libraries
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(scales)
+`);
+
+  // 2. Snowflake connection (if any Snowflake datasets exist)
+  const hasSnowflake = Object.values(datasetRegistry.datasets || {}).some(d => d.source === 'snowflake');
+  if (hasSnowflake) {
+    parts.push(`# Snowflake Connection Setup (optional - uncomment and configure)
+# library(DBI)
+# library(odbc)
+# conn <- dbConnect(odbc::odbc(),
+#   Driver = "Snowflake",
+#   Server = "your-account.snowflakecomputing.com",
+#   UID = "your-username",
+#   authenticator = "externalbrowser"
+# )
+`);
+  }
+
+  // 3. Dataset loading
+  const datasetCode = generateDatasetLoadCode(datasetRegistry.datasets || {});
+  if (datasetCode.trim()) {
+    parts.push(`# Load datasets\n${datasetCode}`);
+  }
+
+  // 4. All code in execution order
+  if (codeChain.length > 0) {
+    parts.push(`# Analysis code`);
+    parts.push(codeChain.map(card => card.code).join('\n\n'));
+  }
+
+  return parts.join('\n');
+}
+
+/**
  * Generate a report using Quarto
  * @param {string} reportsDir - Directory to save the report
  * @param {number} timestamp - Timestamp for filename
@@ -3531,6 +3629,113 @@ format:
       resolve({ htmlPath, htmlFilename });
     });
   });
+}
+
+/**
+ * Generate a Quarto report with full reproducible code
+ * @param {string} reportsDir - Directory to save the report
+ * @param {number} timestamp - Timestamp for filename
+ * @param {string} title - Report title
+ * @param {string} date - Report date
+ * @param {Array} findings - Array of findings with cardIds, headings, descriptions
+ * @param {Array} codeCards - All code cards in execution order
+ * @param {Object} datasetRegistry - Dataset registry with all datasets
+ * @returns {Promise<Object>} Object with qmdPath and qmdFilename
+ */
+async function generateQuartoReportWithCode(reportsDir, timestamp, title, date, findings, codeCards, datasetRegistry) {
+  const qmdFilename = `report_${timestamp}.qmd`;
+  const qmdPath = join(reportsDir, qmdFilename);
+
+  // Build code chain from favorited cards
+  const favoritedCardIds = findings.map(f => f.cardId);
+  const codeChain = buildCodeChain(favoritedCardIds, codeCards);
+
+  // Start Quarto document
+  let qmdContent = `---
+title: "${title}"
+date: "${date}"
+format:
+  html:
+    embed-resources: true
+    theme: default
+    toc: false
+    code-fold: false
+---
+
+## Setup
+
+\`\`\`{r setup}
+#| include: false
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(scales)
+\`\`\`
+`;
+
+  // Add Snowflake connection if needed
+  const hasSnowflake = Object.values(datasetRegistry.datasets || {}).some(d => d.source === 'snowflake');
+  if (hasSnowflake) {
+    qmdContent += `
+::: {.callout-note}
+## Snowflake Connection Required
+
+This report uses Snowflake data. Uncomment and configure the connection code below:
+
+\`\`\`{r snowflake-connection}
+#| eval: false
+library(DBI)
+library(odbc)
+conn <- dbConnect(odbc::odbc(),
+  Driver = "Snowflake",
+  Server = "your-account.snowflakecomputing.com",
+  UID = "your-username",
+  authenticator = "externalbrowser"
+)
+\`\`\`
+:::
+
+`;
+  }
+
+  // Add dataset loading code
+  const datasetCode = generateDatasetLoadCode(datasetRegistry.datasets || {});
+  if (datasetCode.trim()) {
+    qmdContent += `
+\`\`\`{r load-data}
+${datasetCode}
+\`\`\`
+
+`;
+  }
+
+  // Add each finding with its code
+  findings.forEach((finding, idx) => {
+    const card = codeCards.find(c => c.id === finding.cardId);
+
+    if (!card) return;
+
+    // Add heading if provided
+    if (finding.heading) {
+      qmdContent += `## ${finding.heading}\n\n`;
+    } else {
+      qmdContent += `## Analysis ${idx + 1}\n\n`;
+    }
+
+    // Add description if provided
+    if (finding.description) {
+      qmdContent += `${finding.description}\n\n`;
+    }
+
+    // Add the R code that generated this output
+    qmdContent += `\`\`\`{r}\n${card.code}\n\`\`\`\n\n`;
+  });
+
+  // Write the .qmd file
+  await writeFile(qmdPath, qmdContent, 'utf-8');
+  console.log(`✅ Created Quarto file with code: ${qmdFilename}`);
+
+  return { qmdPath, qmdFilename };
 }
 
 // Create Quarto report endpoint with HTML fallback
@@ -3802,6 +4007,211 @@ app.post('/api/create-quarto-report', async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating report:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Export Quarto report with full reproducible code
+ */
+app.post('/api/export-quarto', async (req, res) => {
+  try {
+    const { title, date, findings, codeCards, datasetRegistry } = req.body;
+
+    if (!title || !findings || !codeCards || !datasetRegistry) {
+      return res.status(400).json({ error: 'Missing required export data' });
+    }
+
+    // Create reports directory if it doesn't exist
+    const reportsDir = join(__dirname, 'reports');
+    await mkdir(reportsDir, { recursive: true });
+
+    // Generate filename with timestamp
+    const timestamp = Date.now();
+    const { qmdPath, qmdFilename } = await generateQuartoReportWithCode(
+      reportsDir, timestamp, title, date, findings, codeCards, datasetRegistry
+    );
+
+    console.log(`✅ Quarto export complete: ${qmdFilename}`);
+
+    res.json({
+      success: true,
+      qmdPath: qmdPath,
+      qmdFilename: qmdFilename,
+      downloadUrl: `/reports/${qmdFilename}`
+    });
+  } catch (error) {
+    console.error('Error exporting Quarto report:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Export Jupyter notebook with full reproducible code
+ */
+app.post('/api/export-jupyter', async (req, res) => {
+  try {
+    const { title, findings, codeCards, datasetRegistry } = req.body;
+
+    if (!title || !findings || !codeCards || !datasetRegistry) {
+      return res.status(400).json({ error: 'Missing required export data' });
+    }
+
+    // Create reports directory if it doesn't exist
+    const reportsDir = join(__dirname, 'reports');
+    await mkdir(reportsDir, { recursive: true });
+
+    // Build code chain from favorited cards
+    const favoritedCardIds = findings.map(f => f.cardId);
+    const codeChain = buildCodeChain(favoritedCardIds, codeCards);
+
+    // Build notebook structure
+    const cells = [];
+
+    // Title cell
+    cells.push({
+      cell_type: 'markdown',
+      metadata: {},
+      source: [`# ${title}\n`]
+    });
+
+    // Setup cell - libraries
+    cells.push({
+      cell_type: 'markdown',
+      metadata: {},
+      source: ['## Setup\n']
+    });
+
+    cells.push({
+      cell_type: 'code',
+      execution_count: null,
+      metadata: {},
+      source: [
+        'library(dplyr)\n',
+        'library(ggplot2)\n',
+        'library(tidyr)\n',
+        'library(scales)'
+      ],
+      outputs: []
+    });
+
+    // Snowflake connection if needed
+    const hasSnowflake = Object.values(datasetRegistry.datasets || {}).some(d => d.source === 'snowflake');
+    if (hasSnowflake) {
+      cells.push({
+        cell_type: 'markdown',
+        metadata: {},
+        source: [
+          '### Snowflake Connection (Optional)\n',
+          '\n',
+          'Uncomment and configure the connection code below if using Snowflake data:\n'
+        ]
+      });
+
+      cells.push({
+        cell_type: 'code',
+        execution_count: null,
+        metadata: {},
+        source: [
+          '# library(DBI)\n',
+          '# library(odbc)\n',
+          '# conn <- dbConnect(odbc::odbc(),\n',
+          '#   Driver = "Snowflake",\n',
+          '#   Server = "your-account.snowflakecomputing.com",\n',
+          '#   UID = "your-username",\n',
+          '#   authenticator = "externalbrowser"\n',
+          '# )\n'
+        ],
+        outputs: []
+      });
+    }
+
+    // Dataset loading
+    const datasetCode = generateDatasetLoadCode(datasetRegistry.datasets || {});
+    if (datasetCode.trim()) {
+      cells.push({
+        cell_type: 'markdown',
+        metadata: {},
+        source: ['## Load Datasets\n']
+      });
+
+      cells.push({
+        cell_type: 'code',
+        execution_count: null,
+        metadata: {},
+        source: datasetCode.split('\n').map(line => line + '\n'),
+        outputs: []
+      });
+    }
+
+    // Analysis cells - one markdown + code cell per finding
+    findings.forEach((finding, idx) => {
+      const card = codeCards.find(c => c.id === finding.cardId);
+      if (!card) return;
+
+      // Section heading
+      const heading = finding.heading || `Analysis ${idx + 1}`;
+      cells.push({
+        cell_type: 'markdown',
+        metadata: {},
+        source: [`## ${heading}\n`]
+      });
+
+      // Description if provided
+      if (finding.description) {
+        cells.push({
+          cell_type: 'markdown',
+          metadata: {},
+          source: finding.description.split('\n').map(line => line + '\n')
+        });
+      }
+
+      // Code cell
+      cells.push({
+        cell_type: 'code',
+        execution_count: null,
+        metadata: {},
+        source: card.code.split('\n').map(line => line + '\n'),
+        outputs: []
+      });
+    });
+
+    // Build final notebook structure
+    const notebook = {
+      cells,
+      metadata: {
+        kernelspec: {
+          display_name: 'R',
+          language: 'R',
+          name: 'ir'
+        },
+        language_info: {
+          name: 'R',
+          version: '4.5.0',
+          mimetype: 'text/x-r-source',
+          file_extension: '.r'
+        }
+      },
+      nbformat: 4,
+      nbformat_minor: 5
+    };
+
+    // Save to file
+    const timestamp = Date.now();
+    const filename = `report_${timestamp}.ipynb`;
+    const filepath = join(reportsDir, filename);
+    await writeFile(filepath, JSON.stringify(notebook, null, 2), 'utf-8');
+
+    console.log(`✅ Jupyter notebook export complete: ${filename}`);
+
+    res.json({
+      success: true,
+      filename: filename,
+      filepath: filepath,
+      downloadUrl: `/reports/${filename}`
+    });
+  } catch (error) {
+    console.error('Error exporting Jupyter notebook:', error);
     res.status(500).json({ error: error.message });
   }
 });

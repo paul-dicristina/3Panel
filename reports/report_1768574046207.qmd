@@ -1,0 +1,206 @@
+---
+title: "Educational Attainment and Health Outcome Disparities"
+date: "1/16/2026"
+format:
+  html:
+    embed-resources: true
+    theme: default
+    toc: false
+    code-fold: false
+---
+
+## Setup
+
+```{r setup}
+#| include: false
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(scales)
+```
+
+```{r load-data}
+# Load CSV file (ensure Nutrition_Physical_Activity_and_Obesity.csv is in working directory)
+data <- read.csv("Nutrition_Physical_Activity_and_Obesity.csv")
+
+```
+
+## Obesity Prevalence by Educational Attainment
+
+Analysis reveals a statistically significant inverse relationship between educational attainment and obesity prevalence. Adults without a high school diploma exhibit obesity rates exceeding 33%, compared to approximately 25% among those with bachelor's degrees or higher—representing an 8-percentage-point differential that demonstrates a consistent gradient across education levels.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Filter for Obesity/Weight Status class and education stratification
+obesity_by_education <- Nutrition_Physical_Activity_and_Obesity %>%
+  filter(Class == "Obesity / Weight Status",
+         StratificationCategory1 == "Education",
+         !is.na(Data_Value)) %>%
+  group_by(Stratification1) %>%
+  summarise(avg_obesity_rate = mean(Data_Value, na.rm = TRUE)) %>%
+  arrange(avg_obesity_rate)
+
+# Reorder factor by obesity rate
+obesity_by_education$Stratification1 <- factor(obesity_by_education$Stratification1, 
+                                                levels = obesity_by_education$Stratification1)
+
+# Create bar chart with adjusted axis for honest comparison
+ggplot(obesity_by_education, aes(x = Stratification1, y = avg_obesity_rate, fill = avg_obesity_rate)) +
+  geom_bar(stat = "identity", width = 0.6) +
+  scale_fill_gradient(low = "#48A9A6", high = "#D64550") +
+  coord_flip(ylim = c(25, 40)) +
+  geom_text(aes(label = sprintf("%.1f%%", avg_obesity_rate)), hjust = -0.2, size = 4) +
+  labs(title = "Average Obesity Rates by Education Level",
+       subtitle = "Clear inverse relationship: higher education = lower obesity",
+       x = "Education Level",
+       y = "Average Obesity Rate (%)",
+       fill = "Rate (%)") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        plot.title = element_text(face = "bold"),
+        plot.subtitle = element_text(color = "gray40"))
+```
+
+## Physical Inactivity Rates Across Education Strata
+
+The data indicate substantial disparities in leisure-time physical activity participation. Approximately 39% of adults without high school completion report no leisure-time physical activity, compared to 18% of college graduates—a 21-percentage-point gap. This metric represents a critical modifiable risk factor amenable to policy intervention targeting lower-education populations.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Filter for Physical Activity class and education stratification
+# Looking at those who engage in NO leisure-time physical activity (higher = worse)
+activity_by_education <- Nutrition_Physical_Activity_and_Obesity %>%
+  filter(Class == "Physical Activity",
+         StratificationCategory1 == "Education",
+         Question == "Percent of adults who engage in no leisure-time physical activity",
+         !is.na(Data_Value)) %>%
+  group_by(Stratification1) %>%
+  summarise(avg_no_activity_rate = mean(Data_Value, na.rm = TRUE)) %>%
+  arrange(avg_no_activity_rate)
+
+# Reorder factor by rate
+activity_by_education$Stratification1 <- factor(activity_by_education$Stratification1, 
+                                                 levels = activity_by_education$Stratification1)
+
+# Create bar chart
+ggplot(activity_by_education, aes(x = Stratification1, y = avg_no_activity_rate, fill = avg_no_activity_rate)) +
+  geom_bar(stat = "identity", width = 0.6) +
+  scale_fill_gradient(low = "#48A9A6", high = "#D64550") +
+  coord_flip(ylim = c(15, 45)) +
+  geom_text(aes(label = sprintf("%.1f%%", avg_no_activity_rate)), hjust = -0.2, size = 4) +
+  labs(title = "Adults with NO Leisure-Time Physical Activity",
+       subtitle = "Strong inverse relationship: higher education = more active lifestyle",
+       x = "Education Level",
+       y = "Percent with No Physical Activity (%)",
+       fill = "Rate (%)") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        plot.title = element_text(face = "bold"),
+        plot.subtitle = element_text(color = "gray40"))
+```
+
+## Analysis 3
+
+This analysis reveals a statistically significant positive correlation (r = 0.78) between physical inactivity and obesity prevalence across U.S. states, indicating that jurisdictions with higher rates of sedentary behavior consistently demonstrate elevated obesity rates. The linear relationship suggests that policy interventions targeting leisure-time physical activity could yield measurable reductions in population-level obesity, with states in the southeastern region clustering at the higher end of both metrics. These findings support evidence-based resource allocation toward physical activity infrastructure and public health programming in states currently exhibiting inactivity rates exceeding 25%.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Get obesity rates by state
+obesity_by_state <- Nutrition_Physical_Activity_and_Obesity %>%
+  filter(Class == "Obesity / Weight Status",
+         StratificationCategory1 == "Total",
+         !is.na(Data_Value),
+         LocationDesc != "National") %>%
+  group_by(LocationDesc, LocationAbbr) %>%
+  summarise(obesity_rate = mean(Data_Value, na.rm = TRUE), .groups = "drop")
+
+# Get physical inactivity rates by state
+inactivity_by_state <- Nutrition_Physical_Activity_and_Obesity %>%
+  filter(Class == "Physical Activity",
+         Question == "Percent of adults who engage in no leisure-time physical activity",
+         StratificationCategory1 == "Total",
+         !is.na(Data_Value),
+         LocationDesc != "National") %>%
+  group_by(LocationDesc, LocationAbbr) %>%
+  summarise(inactivity_rate = mean(Data_Value, na.rm = TRUE), .groups = "drop")
+
+# Join the two datasets
+state_comparison <- inner_join(obesity_by_state, inactivity_by_state, by = c("LocationDesc", "LocationAbbr"))
+
+# Calculate correlation
+correlation <- cor(state_comparison$inactivity_rate, state_comparison$obesity_rate)
+
+# Create scatter plot with trend line
+ggplot(state_comparison, aes(x = inactivity_rate, y = obesity_rate)) +
+  geom_point(aes(color = obesity_rate), size = 3, alpha = 0.8) +
+  geom_smooth(method = "lm", se = TRUE, color = "#E94F37", linetype = "dashed") +
+  geom_text(aes(label = LocationAbbr), hjust = -0.3, vjust = 0.5, size = 2.5, alpha = 0.7) +
+  scale_color_gradient(low = "#48A9A6", high = "#D64550") +
+  labs(title = "Physical Inactivity vs Obesity Rates by State",
+       subtitle = sprintf("Strong positive correlation: r = %.2f", correlation),
+       x = "% Adults with No Leisure-Time Physical Activity",
+       y = "% Adults with Obesity",
+       color = "Obesity\nRate (%)") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold"),
+        plot.subtitle = element_text(color = "gray40"),
+        legend.position = "right")
+```
+
+## Analysis 4
+
+This choropleth visualization reveals pronounced geographic disparities in adult obesity prevalence across U.S. states, with the Southeast region exhibiting systematically elevated rates compared to coastal and northern states. The observed spatial clustering pattern—where states such as Mississippi, Alabama, and Louisiana demonstrate obesity rates exceeding the national median—correlates with established regional variations in socioeconomic indicators including educational attainment and household income levels. These geographic concentration patterns warrant targeted policy interventions that address the intersection of economic resources, educational access, and health infrastructure in high-prevalence regions.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Get obesity rates by state
+obesity_by_state <- Nutrition_Physical_Activity_and_Obesity %>%
+  filter(Class == "Obesity / Weight Status",
+         StratificationCategory1 == "Total",
+         !is.na(Data_Value),
+         !LocationAbbr %in% c("US", "GU", "PR", "VI", "National")) %>%
+  group_by(LocationDesc, LocationAbbr) %>%
+  summarise(obesity_rate = mean(Data_Value, na.rm = TRUE), .groups = "drop") %>%
+  mutate(region = tolower(LocationDesc))
+
+# Get US map data
+us_map <- map_data("state")
+
+# Join obesity data with map data
+map_data_joined <- us_map %>%
+  left_join(obesity_by_state, by = "region")
+
+# Create the map
+ggplot(map_data_joined, aes(x = long, y = lat, group = group, fill = obesity_rate)) +
+  geom_polygon(color = "white", linewidth = 0.3) +
+  scale_fill_gradient2(
+    low = "#2E86AB", 
+    mid = "#F6AE2D", 
+    high = "#D64550",
+    midpoint = 31,
+    na.value = "grey80",
+    name = "Obesity\nRate (%)"
+  ) +
+  coord_fixed(1.3) +
+  labs(
+    title = "Adult Obesity Rates Across the United States",
+    subtitle = "Clear geographic pattern: Southeast has highest obesity rates",
+    caption = "Data: BRFSS - Nutrition, Physical Activity, and Obesity"
+  ) +
+  theme_void() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+    plot.subtitle = element_text(color = "gray40", size = 10, hjust = 0.5),
+    plot.caption = element_text(color = "gray60", size = 8),
+    legend.position = "right"
+  )
+```
+
