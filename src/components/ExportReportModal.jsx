@@ -20,22 +20,26 @@ const ExportReportModal = ({ isOpen, onExport, onCancel, isExporting }) => {
     {
       id: 'html',
       label: 'HTML',
-      description: 'Standalone HTML file with embedded visualizations'
+      description: 'Standalone HTML file with embedded visualizations',
+      icon: '/html-icon.svg'
     },
     {
       id: 'quarto',
       label: 'Quarto (.qmd)',
-      description: 'Reproducible document with full code for RStudio'
+      description: 'Reproducible document with full code for RStudio',
+      icon: '/quarto-icon.svg'
     },
     {
       id: 'jupyter',
       label: 'Jupyter Notebook (.ipynb)',
-      description: 'Reproducible notebook with R kernel'
+      description: 'Reproducible notebook with R kernel',
+      icon: '/jupyter-icon.svg'
     },
     {
       id: 'pdf',
       label: 'PDF',
-      description: 'Print to PDF via browser dialog'
+      description: 'Print to PDF via browser dialog',
+      icon: '/PDF-icon.svg'
     }
   ];
 
@@ -70,10 +74,17 @@ const ExportReportModal = ({ isOpen, onExport, onCancel, isExporting }) => {
                 <button
                   key={format.id}
                   onClick={() => onExport(format.id)}
-                  className="w-full text-left px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-colors"
+                  className="w-full text-left px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-colors flex items-start gap-4"
                 >
-                  <div className="font-medium text-gray-900">{format.label}</div>
-                  <div className="text-sm text-gray-600 mt-1">{format.description}</div>
+                  <img
+                    src={format.icon}
+                    alt={format.label}
+                    className="w-[53px] h-[53px] flex-shrink-0"
+                  />
+                  <div className="flex-1">
+                    <div className="font-medium text-gray-900">{format.label}</div>
+                    <div className="text-sm text-gray-600 mt-1">{format.description}</div>
+                  </div>
                 </button>
               ))}
             </div>
