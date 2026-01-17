@@ -6,14 +6,15 @@ This document describes how 3Panel's interactive suggestions and automatic datas
 
 1. [Mode Selector Control](#mode-selector-control)
 2. [Report Rewrite Feature](#report-rewrite-feature)
-3. [Important Bug Fixes](#important-bug-fixes)
-4. [Interactive Suggestions Overview](#interactive-suggestions-overview)
-5. [How Interactive Elements Are Created](#how-interactive-elements-are-created)
-6. [Dataset Naming Convention](#dataset-naming-convention)
-7. [Automatic Dataset Tracking](#automatic-dataset-tracking)
-8. [Metadata Flow](#metadata-flow)
-9. [Conversation Persistence](#conversation-persistence)
-10. [Troubleshooting](#troubleshooting)
+3. [Multi-Format Report Export](#multi-format-report-export)
+4. [Important Bug Fixes](#important-bug-fixes)
+5. [Interactive Suggestions Overview](#interactive-suggestions-overview)
+6. [How Interactive Elements Are Created](#how-interactive-elements-are-created)
+7. [Dataset Naming Convention](#dataset-naming-convention)
+8. [Automatic Dataset Tracking](#automatic-dataset-tracking)
+9. [Metadata Flow](#metadata-flow)
+10. [Conversation Persistence](#conversation-persistence)
+11. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -556,6 +557,448 @@ The rewrite feature integrates with 3Panel's conversation persistence system:
 - **Output Pinning**: Fix certain outputs in place during reordering
 - **Unlimited Undo/Redo**: Full history navigation
 - **Export Style Matching**: Apply report style to exported HTML/PDF
+
+---
+
+## Multi-Format Report Export
+
+**Status:** Fully Implemented (2026-01-17)
+
+3Panel supports exporting reports in multiple formats with full reproducible code for Quarto and Jupyter notebooks. Users can export their analysis reports with a single click using a dropdown menu.
+
+### Key Features
+
+- **4 Export Formats**: HTML, Quarto (.qmd), Jupyter Notebook (.ipynb), PDF
+- **Full Code Reproducibility**: Quarto and Jupyter exports include ALL code needed to reproduce results
+- **Automatic Dataset Loading**: Generates code to load CSV files and connect to Snowflake
+- **Smart Code Chain Building**: Includes all prerequisite code for favorited outputs
+- **Single-Gesture UI**: Click Export → Select format → Done
+
+### Export Formats
+
+#### 1. HTML Export
+- **Output**: Standalone HTML file with embedded visualizations
+- **Code Included**: No (visual report only)
+- **Behavior**: Opens in new browser window
+- **Use Case**: Sharing final results, presentations, stakeholder reports
+
+#### 2. Quarto Export (.qmd)
+- **Output**: Quarto markdown document
+- **Code Included**: Yes - full reproducible script
+- **Behavior**: Downloads .qmd file
+- **Use Case**: Reproducible research, RStudio workflows, literate programming
+- **Requirements**: Requires Quarto and R to render
+
+**Document Structure:**
+```qmd
+---
+title: "Report Title"
+date: "1/17/2026"
+format:
+  html:
+    embed-resources: true
+    theme: default
+    toc: false
+    code-fold: false
+---
+
+## Setup
+
+```{r setup}
+#| include: false
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(scales)
+```
+
+```{r load-data}
+# Load CSV file (ensure lex.csv is in working directory)
+lex <- read.csv("lex.csv")
+```
+
+## Life Expectancy Trends
+
+This visualization shows how life expectancy has changed over time...
+
+```{r}
+ggplot(lex_tidy, aes(year, life_expectancy)) +
+  geom_line() +
+  theme_minimal()
+```
+```
+
+#### 3. Jupyter Notebook Export (.ipynb)
+- **Output**: Jupyter notebook with R kernel
+- **Code Included**: Yes - full reproducible script
+- **Behavior**: Downloads .ipynb file
+- **Use Case**: Interactive analysis, Jupyter workflows, education
+- **Requirements**: Requires Jupyter with R kernel (IRkernel)
+
+**Notebook Structure:**
+- Title cell (markdown)
+- Setup cells (code): Library loading, dataset loading
+- Analysis cells: Heading (markdown) + Description (markdown) + Code (code)
+- Empty output cells (forces user to run code)
+
+#### 4. PDF Export
+- **Output**: PDF document (via browser print)
+- **Code Included**: No (visual report only)
+- **Behavior**: Opens HTML in new window, triggers print dialog
+- **Use Case**: Printed reports, archival, offline sharing
+- **Note**: Uses browser's print-to-PDF functionality
+
+### User Interface
+
+#### Export Report Button (Report Mode Only)
+
+Located in toolbar, visible only when `viewMode === 'report'`:
+
+**Button:**
+- Icon: `/report.png` (16x16px)
+- Label: "Export Report"
+- Disabled when: No outputs favorited
+- Tooltip (disabled): "Add outputs to favorites to export report"
+- Tooltip (enabled): "Export report from conversation"
+
+**Modal Dialog:**
+
+When user clicks the Export Report button, a modal dialog appears with format selection:
+
+```
+┌────────────────────────────────────────┐
+│ Export Report                          │
+│ Choose a format to export your report  │
+├────────────────────────────────────────┤
+│                                        │
+│  ┌──────────────────────────────────┐ │
+│  │ HTML                             │ │
+│  │ Standalone HTML with visuals    │ │
+│  └──────────────────────────────────┘ │
+│                                        │
+│  ┌──────────────────────────────────┐ │
+│  │ Quarto (.qmd)                    │ │
+│  │ Reproducible document with code  │ │
+│  └──────────────────────────────────┘ │
+│                                        │
+│  ┌──────────────────────────────────┐ │
+│  │ Jupyter Notebook (.ipynb)        │ │
+│  │ Reproducible notebook with code  │ │
+│  └──────────────────────────────────┘ │
+│                                        │
+│  ┌──────────────────────────────────┐ │
+│  │ PDF                              │ │
+│  │ Print to PDF via browser dialog  │ │
+│  └──────────────────────────────────┘ │
+│                                        │
+├────────────────────────────────────────┤
+│                            [Cancel]    │
+└────────────────────────────────────────┘
+```
+
+**Behavior:**
+1. Click "Export Report" button → Modal opens
+2. Click desired format button → Export begins
+3. Modal shows progress animation (animated-diamond-loop.svg)
+4. Export completes → Modal closes automatically
+5. If user clicks Cancel or presses ESC → Modal closes without exporting
+
+**Keyboard Shortcuts:**
+- **ESC**: Close modal (only when not exporting)
+
+**Progress State:**
+- When exporting, modal displays:
+  - Animated diamond spinner (animated-diamond-loop.svg)
+  - "Exporting report..." message
+  - "Please wait" subtext
+- Format buttons and Cancel button hidden during export
+- Modal cannot be dismissed while exporting (ESC key disabled)
+
+### Technical Implementation
+
+#### Backend (server.js)
+
+**Helper Functions** (lines 3418-3514):
+
+1. **buildCodeChain(favoritedCardIds, allCodeCards)**
+   - Builds complete code chain for reproducibility
+   - Includes ALL code executed before and including favorited outputs
+   - Strategy: Include all prior code (simple, guaranteed to work)
+   - Returns ordered array of code cards
+
+2. **generateDatasetLoadCode(datasets)**
+   - Generates R code to load datasets from registry
+   - CSV files: `dataset <- read.csv("filename.csv")` with comments
+   - Snowflake: Commented connection code with instructions
+   - Returns complete loading script
+
+3. **buildReproducibleScript(datasetRegistry, codeChain)**
+   - Combines library loading + dataset loading + analysis code
+   - Returns complete standalone R script
+
+**Export Endpoints:**
+
+1. **POST /api/export-quarto** (lines 4017-4047)
+   - Accepts: `{ title, date, findings, codeCards, datasetRegistry }`
+   - Calls `generateQuartoReportWithCode()`
+   - Returns: `{ success, qmdPath, qmdFilename, downloadUrl }`
+
+2. **POST /api/export-jupyter** (lines 4052-4217)
+   - Accepts: `{ title, findings, codeCards, datasetRegistry }`
+   - Builds Jupyter notebook JSON structure
+   - Returns: `{ success, filename, filepath, downloadUrl }`
+
+**Quarto Document Generation** (lines 3634-3739):
+- YAML frontmatter with title, date, format options
+- Setup chunk (libraries, hidden from output)
+- Dataset loading chunks
+- Analysis chunks with headings and descriptions
+- Code chunks set to `code-fold: false` (show code by default)
+
+**Jupyter Notebook Generation** (lines 4052-4217):
+- Proper nbformat 4.5 structure
+- R kernel specification (IRkernel)
+- Markdown cells for headings/descriptions
+- Code cells with `execution_count: null`
+- Empty `outputs: []` arrays (reproducibility test)
+
+#### Frontend (src/App.jsx)
+
+**State** (lines 93-94):
+```javascript
+const [showExportModal, setShowExportModal] = useState(false);
+const [isExporting, setIsExporting] = useState(false);
+```
+
+**Component:** `ExportReportModal` (src/components/ExportReportModal.jsx)
+- Modal dialog component with format selection buttons
+- Progress animation during export using animated-diamond-loop.svg
+- Props: `isOpen`, `onExport`, `onCancel`, `isExporting`
+- Format options with descriptions rendered as large buttons
+- Modal cannot be dismissed during export process
+
+**Export Handler** (lines 626-830):
+```javascript
+const handleExportReport = async (format) => {
+  // Route to appropriate endpoint based on format
+  if (format === 'html' || format === 'pdf') {
+    endpoint = '/api/create-quarto-report';
+    exportData = generateQuartoReport(...); // Visual report
+  } else if (format === 'quarto' || format === 'jupyter') {
+    endpoint = `/api/export-${format}`;
+    exportData = {
+      title: reportTitle,
+      findings: [...], // With cardIds, headings, descriptions
+      codeCards: codeCards,
+      datasetRegistry: datasetRegistry
+    };
+  }
+
+  // Handle result based on format
+  if (format === 'quarto' || format === 'jupyter') {
+    window.location.href = downloadUrl; // Trigger download
+  } else if (format === 'pdf') {
+    window.open(htmlUrl);
+    setTimeout(() => window.print(), 1000);
+  } else {
+    window.open(htmlUrl); // HTML in new window
+  }
+};
+```
+
+**Toolbar Button** (lines ~2707-2718):
+```jsx
+<button
+  onClick={() => setShowExportModal(true)}
+  disabled={favoritedCardIds.size === 0}
+  className="flex items-center gap-1 hover:bg-gray-200 rounded px-1 disabled:opacity-50"
+  title={favoritedCardIds.size === 0 ? "Add outputs to favorites to export report" : "Export report"}
+>
+  <img src="/report.png" alt="Export Report" className="h-4" />
+  <span className="text-[12px] font-medium text-gray-700">Export Report</span>
+</button>
+```
+
+**Modal Component** (lines ~3128-3136):
+```jsx
+<ExportReportModal
+  isOpen={showExportModal}
+  onExport={handleExportReport}
+  onCancel={() => setShowExportModal(false)}
+  isExporting={isExporting}
+/>
+```
+
+### Code Inclusion Strategy
+
+**Problem**: Code cards store individual snippets but NOT their dependencies. Cannot automatically identify which datasets/variables a code snippet uses.
+
+**Solution**: Include ALL prior code (Option A - Simple & Guaranteed)
+
+**How it works:**
+1. User favorites outputs (e.g., cards #5, #8, #12)
+2. System finds highest favorited card (#12)
+3. Includes ALL code from cards #1-#12
+4. Deduplicates code cards
+5. Results in complete, guaranteed-to-work script
+
+**Example:**
+```r
+# Card 1: Load data
+lex <- read.csv("lex.csv")
+
+# Card 2: Transform to tidy
+lex_tidy <- lex %>% pivot_longer(...)
+
+# Card 3: Other analysis (not favorited)
+summary(lex)
+
+# Card 4: Plot (favorited)
+ggplot(lex_tidy, aes(...)) + geom_line()
+```
+
+Export includes cards #1, #2, #4 (all code up to favorited output).
+
+**Alternative Considered**: Dependency parsing (analyze which variables each code uses)
+- **Complexity**: Requires R AST parsing or complex regex
+- **Fragility**: May miss implicit dependencies
+- **Decision**: Deferred to future enhancement
+
+### Dataset Loading
+
+**CSV Files:**
+```r
+# Load CSV file (ensure lex.csv is in working directory)
+lex <- read.csv("lex.csv")
+```
+- Includes filename from dataset registry
+- Comment reminds user to have file in working directory
+- Future enhancement: Bundle CSV in ZIP file
+
+**Snowflake Tables:**
+```r
+# Snowflake Connection Setup (optional - uncomment and configure)
+# library(DBI)
+# library(odbc)
+# conn <- dbConnect(odbc::odbc(),
+#   Driver = "Snowflake",
+#   Server = "your-account.snowflakecomputing.com",
+#   UID = "your-username",
+#   authenticator = "externalbrowser"
+# )
+
+# Load Snowflake table: DATABASE.SCHEMA.TABLE
+# Note: Requires Snowflake connection (see connection code in setup)
+# lex <- dbGetQuery(conn, "SELECT * FROM DATABASE.SCHEMA.TABLE LIMIT 1000")
+```
+- Includes full connection template (commented)
+- User must supply credentials
+- Includes full table name reference
+
+### Report Context Integration
+
+Exports leverage existing report features:
+
+**Report Title**: From `reportTitle` state (AI-generated during dataset load)
+
+**Report Description**: From `reportDescription` state (dataset subject section)
+
+**Section Headings**: From `favoritedOutputHeadings` (generated by Report Rewrite)
+- Only present if user has used "Rewrite Report" feature
+- Otherwise uses "Analysis 1", "Analysis 2", etc.
+
+**Output Descriptions**: From `favoritedOutputDescriptions`
+- Generated when favoriting outputs
+- Maintained across rewrites
+- Used as explanatory text in exported documents
+
+### File Locations
+
+**Backend Files:**
+- [server.js](server.js) - Lines 3418-4217 (helpers, endpoints, generators)
+
+**Frontend Files:**
+- [src/App.jsx](src/App.jsx) - Lines 92, 626-830, 2693-2722
+
+**Export Output:**
+- All exports saved to `/reports/` directory
+- Served via `app.use('/reports', express.static(...))`
+- Filenames: `report_{timestamp}.{ext}`
+
+### Usage Examples
+
+#### Basic HTML Export
+1. Load dataset, create visualizations
+2. Star favorite outputs (⭐)
+3. Switch to Report mode
+4. Click "Export Report" → "HTML"
+5. Report opens in new window
+
+#### Quarto Reproducible Export
+1. Load CSV dataset
+2. Create tidy transformation
+3. Create plots/tables
+4. Star outputs for report
+5. Click "Export Report" → "Quarto (.qmd)"
+6. File downloads: `report_1737158400000.qmd`
+7. Open in RStudio → Click "Render" → Fully reproduces analysis
+
+#### Jupyter Workflow
+1. Load Snowflake data
+2. Run analysis, favorite outputs
+3. Click "Export Report" → "Jupyter Notebook (.ipynb)"
+4. File downloads: `report_1737158400000.ipynb`
+5. Open in Jupyter Lab
+6. Run all cells → Reproduces analysis (after configuring Snowflake connection)
+
+### Error Handling
+
+**User-Facing Errors:**
+- No favorited outputs: Button disabled with tooltip
+- API error: Alert with error message
+- Network failure: Alert with suggestion to check connection
+- Invalid response: Alert with "Export failed" message
+
+**Graceful Degradation:**
+- If Quarto not installed, HTML export still works
+- If download fails, provides URL for manual download
+- Popup blockers: Alert with manual URL
+
+### Troubleshooting
+
+#### Issue: Quarto export doesn't render
+
+**Cause:** Missing dataset file or Quarto not installed
+
+**Fix:**
+1. Ensure CSV files are in same directory as .qmd
+2. Install Quarto: https://quarto.org/docs/get-started/
+3. Install R packages: `install.packages(c("dplyr", "ggplot2", "tidyr", "scales"))`
+
+#### Issue: Jupyter notebook cells won't run
+
+**Cause:** R kernel not installed or datasets missing
+
+**Fix:**
+1. Install IRkernel: `install.packages('IRkernel'); IRkernel::installspec()`
+2. Ensure CSV files are in notebook directory
+3. For Snowflake: Uncomment and configure connection code
+
+#### Issue: PDF export shows print dialog but doesn't create PDF
+
+**Expected:** Browser print dialog is manual - user must click "Save as PDF"
+
+**Note:** This is browser print-to-PDF functionality, not automatic PDF generation
+
+### Future Enhancements
+
+- **ZIP Bundle**: Include CSV files with Quarto/Jupyter exports
+- **Quarto → PDF**: Server-side PDF generation (requires LaTeX)
+- **Dependency Parsing**: Smarter code inclusion (only required code)
+- **Snowflake Auth**: Embed Snowflake credentials securely (keychain/env vars)
+- **Custom Templates**: User-defined Quarto/Jupyter templates
+- **Incremental Exports**: Export only new/changed outputs
+- **Collaboration**: Share exports via cloud storage integration
 
 ---
 
@@ -1501,9 +1944,11 @@ Potential improvements (out of scope for v1):
 
 | File | Purpose | Lines |
 |------|---------|-------|
-| `server.js` | Backend logic for suggestions, dataset tracking & R workspace persistence | 79-3880 |
-| `src/App.jsx` | Frontend dataset registry, code execution & conversation persistence | 52-2575 |
+| `server.js` | Backend logic for suggestions, dataset tracking, export & R workspace persistence | 79-4300 |
+| `src/App.jsx` | Frontend dataset registry, code execution, export UI & conversation persistence | 52-2800 |
 | `src/components/InteractiveSuggestion.jsx` | Interactive UI component | 1-416 |
+| `src/components/ReportRewriteModal.jsx` | Report rewrite dialog with style options | 1-200 |
+| `src/components/ExportReportModal.jsx` | Export format selection modal with progress | 1-90 |
 | `src/components/StorageWarningModal.jsx` | Storage quota exceeded modal | 1-68 |
 | `src/components/DatasetRestorationBanner.jsx` | Dataset reload warning banner (deprecated) | 1-67 |
 | `src/utils/claudeApi.js` | API communication with active dataset | 20-35 |
@@ -1517,6 +1962,13 @@ Potential improvements (out of scope for v1):
 - `app.post('/api/chat')` - Main API endpoint with suggestion generation
 - `app.post('/api/execute-r')` - R code execution with metadata refresh
 - `app.post('/api/clear-workspace')` - Clear R workspace (temp + persistent)
+- `app.post('/api/export-quarto')` - Export Quarto document with full reproducible code
+- `app.post('/api/export-jupyter')` - Export Jupyter notebook with full reproducible code
+- `app.post('/api/create-quarto-report')` - Create HTML report (visual only)
+- `buildCodeChain()` - Build complete code chain for reproducibility
+- `generateDatasetLoadCode()` - Generate R code to load datasets from registry
+- `buildReproducibleScript()` - Combine libraries, datasets, and analysis code into standalone script
+- `generateQuartoReportWithCode()` - Generate Quarto document with full code
 - `saveWorkspaceOnShutdown()` - Save R workspace to persistent storage on SIGINT/SIGTERM
 - `loadWorkspaceOnStartup()` - Restore R workspace from persistent storage on server start
 - `executeRWorkspaceOperation()` - Helper to execute R code for workspace operations
@@ -1524,6 +1976,10 @@ Potential improvements (out of scope for v1):
 **Frontend:**
 - `handleSendMessage()` - Sends messages with active dataset
 - `executeRCode()` - Executes R code and updates registry
+- `handleExportReport(format)` - Export report in specified format (html/quarto/jupyter/pdf)
+- `handleRewriteReport()` - Rewrite and reorganize report with Claude AI
+- `handleUndoRewrite()` - Undo last report rewrite
+- `handleRedoRewrite()` - Redo last undone rewrite
 - `InteractiveSuggestion` - Renders interactive suggestion UI
 - `saveConversationState()` - Saves state to localStorage with size optimization
 - `loadConversationState()` - Restores state from localStorage on mount

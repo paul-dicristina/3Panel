@@ -13,6 +13,7 @@ import DatasetRestorationBanner from './components/DatasetRestorationBanner';
 import InteractiveSuggestion from './components/InteractiveSuggestion';
 import ReactiveComponent from './components/ReactiveComponent';
 import ReportRewriteModal from './components/ReportRewriteModal';
+import ExportReportModal from './components/ExportReportModal';
 import { sendMessageToClaude } from './utils/claudeApi';
 import { executeRCode } from './utils/rExecutor';
 import {
@@ -88,8 +89,9 @@ function App() {
   const [persistedCustomStyle, setPersistedCustomStyle] = useState('');
   const [persistedObjective, setPersistedObjective] = useState('');
 
-  // Export format state
-  const [exportFormat, setExportFormat] = useState('html');
+  // Export modal state
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   const [isSubmitAnimating, setIsSubmitAnimating] = useState(false);
   const [expandedSuggestions, setExpandedSuggestions] = useState(new Set()); // Track which message IDs have expanded suggestions
@@ -626,6 +628,9 @@ function App() {
   const handleExportReport = async (format) => {
     console.log('=== REPORT EXPORT START ===', format);
 
+    // Set exporting state
+    setIsExporting(true);
+
     // For Quarto and Jupyter, trigger download instead of opening window
     const shouldDownload = format === 'quarto' || format === 'jupyter';
 
@@ -816,6 +821,11 @@ Please respond with a JSON object in this format:
           if (reportWindow) reportWindow.close();
         }
       }
+
+      // Export completed successfully
+      setIsExporting(false);
+      setShowExportModal(false);
+      console.log('=== REPORT EXPORT SUCCESS ===');
     } catch (error) {
       console.error('=== REPORT GENERATION FAILED ===');
       console.error('Error details:', error);
@@ -826,6 +836,11 @@ Please respond with a JSON object in this format:
       if (reportWindow) {
         reportWindow.close();
       }
+
+      // Reset export state
+      setIsExporting(false);
+      setShowExportModal(false);
+
       alert('Failed to create report: ' + error.message);
     }
   };
@@ -2691,32 +2706,15 @@ Respond with ONLY a JSON code block in this format:
 
             {/* Export Report - only visible in Report mode */}
             {viewMode === 'report' && (
-              <div className="flex items-center gap-2">
-                {/* Format selector */}
-                <select
-                  value={exportFormat}
-                  onChange={(e) => setExportFormat(e.target.value)}
-                  className="text-[11px] border border-gray-300 rounded px-2 py-1 h-6 disabled:opacity-50 disabled:cursor-not-allowed"
-                  disabled={favoritedCardIds.size === 0}
-                  title="Export format"
-                >
-                  <option value="html">HTML</option>
-                  <option value="quarto">Quarto (.qmd)</option>
-                  <option value="jupyter">Jupyter (.ipynb)</option>
-                  <option value="pdf">PDF</option>
-                </select>
-
-                {/* Export button */}
-                <button
-                  onClick={() => handleExportReport(exportFormat)}
-                  className="flex items-center gap-1 hover:bg-gray-200 rounded transition-colors px-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                  disabled={favoritedCardIds.size === 0}
-                  title={favoritedCardIds.size === 0 ? "Add outputs to favorites to export report" : "Export report from conversation"}
-                >
-                  <img src="/report.png" alt="Export Report" className="h-4" />
-                  <span className="text-[12px] font-medium text-gray-700">Export Report</span>
-                </button>
-              </div>
+              <button
+                onClick={() => setShowExportModal(true)}
+                className="flex items-center gap-1 hover:bg-gray-200 rounded transition-colors px-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={favoritedCardIds.size === 0}
+                title={favoritedCardIds.size === 0 ? "Add outputs to favorites to export report" : "Export report from conversation"}
+              >
+                <img src="/report.png" alt="Export Report" className="h-4" />
+                <span className="text-[12px] font-medium text-gray-700">Export Report</span>
+              </button>
             )}
 
             {/* Output panel toolbar icons - only visible in Explore mode */}
@@ -3126,6 +3124,14 @@ Respond with ONLY a JSON code block in this format:
         onCustomStyleChange={setPersistedCustomStyle}
         persistedObjective={persistedObjective}
         onObjectiveChange={setPersistedObjective}
+      />
+
+      {/* Export Report Modal */}
+      <ExportReportModal
+        isOpen={showExportModal}
+        onExport={handleExportReport}
+        onCancel={() => setShowExportModal(false)}
+        isExporting={isExporting}
       />
     </div>
   );

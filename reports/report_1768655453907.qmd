@@ -1,0 +1,55 @@
+---
+title: "Global Life Expectancy 1800-2100"
+date: "1/17/2026"
+format:
+  html:
+    embed-resources: true
+    theme: default
+    toc: false
+    code-fold: false
+---
+
+## Setup
+
+```{r setup}
+#| include: false
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(scales)
+```
+
+```{r load-data}
+# Load CSV file (ensure lex.csv is in working directory)
+data <- read.csv("lex.csv")
+
+```
+
+## Analysis 1
+
+The line chart reveals striking convergence in life expectancy trajectories among the three nations. While the USA maintained consistently higher life expectancy throughout the 19th and 20th centuries, China and India have experienced dramatic improvements—particularly China's rapid rise from the mid-20th century onward. The projections suggest all three countries will achieve similar life expectancy levels (around 85-90 years) by 2100, representing a remarkable narrowing of what was once a 30-40 year gap.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Filter for the three countries and create the plot
+lex_tidy %>%
+  filter(name %in% c("USA", "China", "India")) %>%
+  ggplot(aes(x = year, y = life_expectancy, color = name)) +
+  geom_line(linewidth = 1) +
+  scale_color_manual(values = c("China" = "#E41A1C", "India" = "#377EB8", "USA" = "#4DAF4A")) +
+  labs(
+    title = "Life Expectancy Over Time: USA, China, and India",
+    subtitle = "1800-2100",
+    x = "Year",
+    y = "Life Expectancy (years)",
+    color = "Country"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold")
+  )
+```
+
