@@ -104,6 +104,20 @@ code {
   animation: icon-shrink 0.3s ease-out forwards;
 }
 
+/* Export format button icon animation (same as suggestion icons) */
+.export-format-button img {
+  transition: none;
+  transform: scale(1);
+}
+
+.export-format-button:hover img {
+  animation: icon-grow 0.3s ease-out forwards;
+}
+
+.export-format-button:not(:hover) img {
+  animation: icon-shrink 0.3s ease-out forwards;
+}
+
 /* Plot container styling - make SVG fit panel while maintaining aspect ratio */
 .plot-container {
   width: 100%;

@@ -74,7 +74,7 @@ const ExportReportModal = ({ isOpen, onExport, onCancel, isExporting }) => {
                 <button
                   key={format.id}
                   onClick={() => onExport(format.id)}
-                  className="w-full text-left px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-colors flex items-start gap-4"
+                  className="export-format-button w-full text-left px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-colors flex items-start gap-4"
                 >
                   <img
                     src={format.icon}

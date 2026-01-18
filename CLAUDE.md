@@ -660,61 +660,136 @@ Located in toolbar, visible only when `viewMode === 'report'`:
 - Disabled when: No outputs favorited
 - Tooltip (disabled): "Add outputs to favorites to export report"
 - Tooltip (enabled): "Export report from conversation"
+- Location: [App.jsx:2707-2718](src/App.jsx#L2707-L2718)
 
-**Modal Dialog:**
+#### Export Report Modal
 
-When user clicks the Export Report button, a modal dialog appears with format selection:
+**Component:** [src/components/ExportReportModal.jsx](src/components/ExportReportModal.jsx)
+
+When user clicks the Export Report button, a modal dialog appears with format selection.
+
+**Modal Structure:**
 
 ```
-┌────────────────────────────────────────────┐
-│ Export Report                              │
-│ Choose a format to export your report      │
-├────────────────────────────────────────────┤
-│                                            │
-│  ┌────────────────────────────────────┐   │
-│  │ [🌐] HTML                          │   │
-│  │      Standalone HTML with visuals  │   │
-│  └────────────────────────────────────┘   │
-│                                            │
-│  ┌────────────────────────────────────┐   │
-│  │ [◉] Quarto (.qmd)                  │   │
-│  │     Reproducible document with code│   │
-│  └────────────────────────────────────┘   │
-│                                            │
-│  ┌────────────────────────────────────┐   │
-│  │ [📓] Jupyter Notebook (.ipynb)     │   │
-│  │      Reproducible notebook with R  │   │
-│  └────────────────────────────────────┘   │
-│                                            │
-│  ┌────────────────────────────────────┐   │
-│  │ [📄] PDF                           │   │
-│  │      Print to PDF via browser      │   │
-│  └────────────────────────────────────┘   │
-│                                            │
-├────────────────────────────────────────────┤
-│                              [Cancel]      │
-└────────────────────────────────────────────┘
-
-Note: Icons shown as symbols; actual UI uses 53px SVG icons
+┌──────────────────────────────────────────────────────┐
+│ Export Report                                        │
+│ Choose a format to export your analysis report       │
+├──────────────────────────────────────────────────────┤
+│                                                      │
+│  ┌───────────────────────────────────────────────┐  │
+│  │ [HTML Icon]  HTML                             │  │
+│  │ 53x53px      Standalone HTML file with        │  │
+│  │              embedded visualizations           │  │
+│  └───────────────────────────────────────────────┘  │
+│                                                      │
+│  ┌───────────────────────────────────────────────┐  │
+│  │ [Quarto Icon] Quarto (.qmd)                   │  │
+│  │ 53x53px       Reproducible document with      │  │
+│  │               full code for RStudio            │  │
+│  └───────────────────────────────────────────────┘  │
+│                                                      │
+│  ┌───────────────────────────────────────────────┐  │
+│  │ [Jupyter Icon] Jupyter Notebook (.ipynb)      │  │
+│  │ 53x53px        Reproducible notebook with     │  │
+│  │                R kernel                        │  │
+│  └───────────────────────────────────────────────┘  │
+│                                                      │
+│  ┌───────────────────────────────────────────────┐  │
+│  │ [PDF Icon]  PDF                               │  │
+│  │ 53x53px     Print to PDF via browser dialog   │  │
+│  └───────────────────────────────────────────────┘  │
+│                                                      │
+├──────────────────────────────────────────────────────┤
+│                                        [Cancel]      │
+└──────────────────────────────────────────────────────┘
 ```
 
-**Behavior:**
-1. Click "Export Report" button → Modal opens
-2. Click desired format button → Export begins
-3. Modal shows progress animation (animated-diamond-loop.svg)
-4. Export completes → Modal closes automatically
-5. If user clicks Cancel or presses ESC → Modal closes without exporting
+**Visual Design:**
+
+**Modal Container:**
+- Width: 500px
+- Background: White with rounded corners (rounded-lg)
+- Shadow: shadow-xl
+- Max height: 90vh with overflow scrolling
+- Z-index: 50 (appears above all other content)
+
+**Header:**
+- Title: "Export Report" (text-lg, font-semibold, text-gray-900)
+- Subtitle: "Choose a format to export your analysis report" (text-sm, text-gray-600)
+- Border bottom: border-gray-200
+
+**Format Selection Buttons:**
+- Full width buttons with left-aligned text
+- Border: border-gray-300, rounded-lg
+- Hover state: bg-gray-50, border-gray-400
+- Layout: Flexbox with 4px gap between icon and text
+- Icons: 53x53px square SVG images (flex-shrink-0)
+  - `/html-icon.svg` - HTML format
+  - `/quarto-icon.svg` - Quarto format
+  - `/jupyter-icon.svg` - Jupyter format
+  - `/PDF-icon.svg` - PDF format
+- Text layout:
+  - Format name: font-medium, text-gray-900
+  - Description: text-sm, text-gray-600, mt-1
+- Spacing: space-y-3 between buttons
+
+**Footer:**
+- Cancel button: text-sm, font-medium, text-gray-700
+- Background: white, border: border-gray-300, rounded-lg
+- Hover: bg-gray-50
+
+**Icon Pulse Animation:**
+
+When user hovers over a format button, the icon animates with a smooth pulse effect matching the suggestion icon animation:
+
+- **Animation:** Same as `.suggestion-button` ([index.css:94-105](src/index.css#L94-L105))
+- **Class:** `.export-format-button` ([index.css:107-119](src/index.css#L107-L119))
+- **On hover:** Icon scales 1 → 1.25 → 1.15 (overshoot)
+- **On hover end:** Icon scales 1.15 → 0.9 → 1 (undershoot)
+- **Duration:** 0.3s ease-out
+- **Keyframes:** Reuses existing `icon-grow` and `icon-shrink` animations
+
+**CSS Implementation:**
+```css
+/* Export format button icon animation (same as suggestion icons) */
+.export-format-button img {
+  transition: none;
+  transform: scale(1);
+}
+
+.export-format-button:hover img {
+  animation: icon-grow 0.3s ease-out forwards;
+}
+
+.export-format-button:not(:hover) img {
+  animation: icon-shrink 0.3s ease-out forwards;
+}
+```
+
+**User Interaction Flow:**
+
+1. **Click "Export Report" button** → Modal opens with format selection
+2. **Hover over format options** → Icon pulse animation plays
+3. **Click desired format button** → Export process begins
+4. **Modal shows progress state**:
+   - Format buttons hidden
+   - Animated diamond spinner displayed (animated-diamond-loop.svg, 64x64px)
+   - "Exporting report..." message (text-sm, text-gray-700)
+   - "Please wait" subtext (text-xs, text-gray-500)
+   - Cancel button hidden
+5. **Export completes** → Modal closes automatically
+6. **Alternative: Click Cancel or press ESC** → Modal closes without exporting
 
 **Keyboard Shortcuts:**
 - **ESC**: Close modal (only when not exporting)
+- Implementation uses `useEffect` with keyboard event listener ([ExportReportModal.jsx:5-15](src/components/ExportReportModal.jsx#L5-L15))
 
-**Progress State:**
-- When exporting, modal displays:
-  - Animated diamond spinner (animated-diamond-loop.svg)
-  - "Exporting report..." message
-  - "Please wait" subtext
-- Format buttons and Cancel button hidden during export
-- Modal cannot be dismissed while exporting (ESC key disabled)
+**Progress State Protection:**
+- Modal cannot be dismissed while `isExporting === true`
+- ESC key disabled during export
+- Cancel button hidden during export
+- Format buttons hidden during export
+- Prevents accidental interruption of export process
 
 ### Technical Implementation
 
@@ -772,39 +847,74 @@ const [showExportModal, setShowExportModal] = useState(false);
 const [isExporting, setIsExporting] = useState(false);
 ```
 
-**Component:** `ExportReportModal` (src/components/ExportReportModal.jsx)
-- Modal dialog component with format selection buttons
-- Progress animation during export using animated-diamond-loop.svg
-- Props: `isOpen`, `onExport`, `onCancel`, `isExporting`
-- Format options with icons (53px square) and descriptions rendered as large buttons
-- Icons: html-icon.svg, quarto-icon.svg, jupyter-icon.svg, PDF-icon.svg
-- Modal cannot be dismissed during export process
-
 **Export Handler** (lines 626-830):
+
+The `handleExportReport` function manages the export process for all formats. Key features:
+
+1. **Sets export state** - Displays progress animation in modal
+2. **Routes to appropriate endpoint** - Different endpoints for different formats
+3. **Handles format-specific behavior** - Download vs. open in new window
+4. **Error handling** - Shows alerts and resets state on failure
+
 ```javascript
 const handleExportReport = async (format) => {
+  console.log('=== REPORT EXPORT START ===', format);
+
+  // Set exporting state to show progress animation
+  setIsExporting(true);
+
   // Route to appropriate endpoint based on format
+  let endpoint, exportData;
+
   if (format === 'html' || format === 'pdf') {
+    // Visual report only (no full code)
     endpoint = '/api/create-quarto-report';
-    exportData = generateQuartoReport(...); // Visual report
+    exportData = generateQuartoReport(...);
   } else if (format === 'quarto' || format === 'jupyter') {
+    // Reproducible report with full code
     endpoint = `/api/export-${format}`;
     exportData = {
       title: reportTitle,
+      date: new Date().toLocaleDateString(),
       findings: [...], // With cardIds, headings, descriptions
-      codeCards: codeCards,
-      datasetRegistry: datasetRegistry
+      codeCards: codeCards,  // All code for buildCodeChain
+      datasetRegistry: datasetRegistry  // For dataset loading
     };
   }
 
-  // Handle result based on format
-  if (format === 'quarto' || format === 'jupyter') {
-    window.location.href = downloadUrl; // Trigger download
-  } else if (format === 'pdf') {
-    window.open(htmlUrl);
-    setTimeout(() => window.print(), 1000);
-  } else {
-    window.open(htmlUrl); // HTML in new window
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(exportData)
+    });
+
+    if (!response.ok) throw new Error(`Export failed: ${response.status}`);
+    const result = await response.json();
+
+    // Handle result based on format
+    if (format === 'quarto' || format === 'jupyter') {
+      window.location.href = result.downloadUrl; // Trigger download
+    } else if (format === 'pdf') {
+      const reportWindow = window.open(result.htmlUrl);
+      setTimeout(() => reportWindow.print(), 1000); // Trigger print dialog
+    } else {
+      window.open(result.htmlUrl); // HTML in new window
+    }
+
+    // Export completed successfully
+    setIsExporting(false);
+    setShowExportModal(false);
+    console.log('=== REPORT EXPORT SUCCESS ===');
+
+  } catch (error) {
+    console.error('Export failed:', error);
+
+    // Reset export state
+    setIsExporting(false);
+    setShowExportModal(false);
+
+    alert('Failed to create report: ' + error.message);
   }
 };
 ```
@@ -814,8 +924,8 @@ const handleExportReport = async (format) => {
 <button
   onClick={() => setShowExportModal(true)}
   disabled={favoritedCardIds.size === 0}
-  className="flex items-center gap-1 hover:bg-gray-200 rounded px-1 disabled:opacity-50"
-  title={favoritedCardIds.size === 0 ? "Add outputs to favorites to export report" : "Export report"}
+  className="flex items-center gap-1 hover:bg-gray-200 rounded px-1 disabled:opacity-50 disabled:cursor-not-allowed"
+  title={favoritedCardIds.size === 0 ? "Add outputs to favorites to export report" : "Export report from conversation"}
 >
   <img src="/report.png" alt="Export Report" className="h-4" />
   <span className="text-[12px] font-medium text-gray-700">Export Report</span>
@@ -830,6 +940,101 @@ const handleExportReport = async (format) => {
   onCancel={() => setShowExportModal(false)}
   isExporting={isExporting}
 />
+```
+
+#### ExportReportModal Component
+
+**File:** [src/components/ExportReportModal.jsx](src/components/ExportReportModal.jsx)
+
+**Props:**
+- `isOpen` (boolean) - Controls modal visibility
+- `onExport` (function) - Called with format ID when user clicks a format button
+- `onCancel` (function) - Called when user clicks Cancel or presses ESC
+- `isExporting` (boolean) - Shows progress animation when true
+
+**Key Features:**
+
+1. **ESC Key Handler** (lines 5-15):
+```javascript
+useEffect(() => {
+  const handleEscKey = (e) => {
+    // Only close on ESC if modal is open and not exporting
+    if (e.key === 'Escape' && isOpen && !isExporting) {
+      onCancel();
+    }
+  };
+
+  document.addEventListener('keydown', handleEscKey);
+  return () => document.removeEventListener('keydown', handleEscKey);
+}, [isOpen, isExporting, onCancel]);
+```
+
+2. **Format Options** (lines 19-44):
+```javascript
+const formatOptions = [
+  {
+    id: 'html',
+    label: 'HTML',
+    description: 'Standalone HTML file with embedded visualizations',
+    icon: '/html-icon.svg'
+  },
+  {
+    id: 'quarto',
+    label: 'Quarto (.qmd)',
+    description: 'Reproducible document with full code for RStudio',
+    icon: '/quarto-icon.svg'
+  },
+  {
+    id: 'jupyter',
+    label: 'Jupyter Notebook (.ipynb)',
+    description: 'Reproducible notebook with R kernel',
+    icon: '/jupyter-icon.svg'
+  },
+  {
+    id: 'pdf',
+    label: 'PDF',
+    description: 'Print to PDF via browser dialog',
+    icon: '/PDF-icon.svg'
+  }
+];
+```
+
+3. **Conditional Rendering** - Shows either format buttons or progress animation based on `isExporting` state
+
+4. **Progress Animation** (lines 59-69):
+```jsx
+{isExporting ? (
+  <div className="flex flex-col items-center justify-center py-12">
+    <img
+      src="/animated-diamond-loop.svg"
+      alt="Exporting..."
+      className="w-16 h-16 mb-4"
+    />
+    <p className="text-sm text-gray-700">Exporting report...</p>
+    <p className="text-xs text-gray-500 mt-1">Please wait</p>
+  </div>
+) : (
+  // Format selection buttons...
+)}
+```
+
+5. **Format Selection Buttons** (lines 72-89):
+```jsx
+<button
+  key={format.id}
+  onClick={() => onExport(format.id)}
+  className="export-format-button w-full text-left px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-colors flex items-start gap-4"
+>
+  <img
+    src={format.icon}
+    alt={format.label}
+    className="w-[53px] h-[53px] flex-shrink-0"
+  />
+  <div className="flex-1">
+    <div className="font-medium text-gray-900">{format.label}</div>
+    <div className="text-sm text-gray-600 mt-1">{format.description}</div>
+  </div>
+</button>
 ```
 
 ### Code Inclusion Strategy
@@ -921,12 +1126,51 @@ Exports leverage existing report features:
 - [server.js](server.js) - Lines 3418-4217 (helpers, endpoints, generators)
 
 **Frontend Files:**
-- [src/App.jsx](src/App.jsx) - Lines 92, 626-830, 2693-2722
+- [src/App.jsx](src/App.jsx) - Lines 93-94 (state), 626-830 (handler), 2707-2718 (button), ~3128-3136 (modal render)
+- [src/components/ExportReportModal.jsx](src/components/ExportReportModal.jsx) - Lines 1-111 (complete component)
+- [src/index.css](src/index.css) - Lines 107-119 (icon animation)
 
 **Export Output:**
 - All exports saved to `/reports/` directory
 - Served via `app.use('/reports', express.static(...))`
 - Filenames: `report_{timestamp}.{ext}`
+
+**Icons:**
+- Located in `/public/` directory
+- `/html-icon.svg` - HTML format (53x53px)
+- `/quarto-icon.svg` - Quarto format (53x53px)
+- `/jupyter-icon.svg` - Jupyter format (53x53px)
+- `/PDF-icon.svg` - PDF format (53x53px)
+
+### Implementation Summary
+
+**Status:** ✅ Fully Implemented (2026-01-18)
+
+**Features Completed:**
+1. ✅ Modal dialog with 4 format selection buttons
+2. ✅ 53x53px SVG icons for each format
+3. ✅ Icon pulse animation on hover (matches suggestion icons)
+4. ✅ Progress animation using animated-diamond-loop.svg
+5. ✅ ESC key support (disabled during export)
+6. ✅ Modal cannot be dismissed during export process
+7. ✅ Error handling with user-friendly alerts
+8. ✅ Integration with existing export backend
+9. ✅ Format-specific behavior (download vs. open in new window)
+10. ✅ Consistent styling with existing modals (Snowflake, Rewrite)
+
+**User Experience:**
+- Single click to open modal
+- Visual feedback with icon animation
+- Clear progress indication during export
+- Graceful error handling
+- Keyboard accessibility (ESC to close)
+
+**Technical Highlights:**
+- Reuses existing export backend endpoints
+- Atomic state updates (no partial states)
+- Clean separation of concerns (modal component is self-contained)
+- CSS animation reuse for consistency
+- Proper cleanup of event listeners
 
 ### Usage Examples
 
@@ -1951,12 +2195,12 @@ Potential improvements (out of scope for v1):
 | `src/App.jsx` | Frontend dataset registry, code execution, export UI & conversation persistence | 52-2800 |
 | `src/components/InteractiveSuggestion.jsx` | Interactive UI component | 1-416 |
 | `src/components/ReportRewriteModal.jsx` | Report rewrite dialog with style options | 1-200 |
-| `src/components/ExportReportModal.jsx` | Export format selection modal with progress | 1-90 |
+| `src/components/ExportReportModal.jsx` | Export format selection modal with icons, progress animation & ESC key support | 1-111 |
 | `src/components/StorageWarningModal.jsx` | Storage quota exceeded modal | 1-68 |
 | `src/components/DatasetRestorationBanner.jsx` | Dataset reload warning banner (deprecated) | 1-67 |
 | `src/utils/claudeApi.js` | API communication with active dataset | 20-35 |
 | `src/utils/persistence.js` | Conversation persistence utilities | 1-171 |
-| `src/index.css` | Styles for interactive elements | 240-420 |
+| `src/index.css` | Styles for interactive elements, export button animation | 1-435 |
 | `.r-workspace.RData` | Persistent R workspace storage (gitignored) | N/A |
 
 ### Important Functions
@@ -2004,4 +2248,4 @@ Potential improvements to consider:
 
 ---
 
-Last updated: 2026-01-12
+Last updated: 2026-01-18
