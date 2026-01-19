@@ -4,18 +4,24 @@ import React, { useState, useEffect } from 'react';
  * ReportRewriteModal Component
  *
  * Modal dialog for capturing user preferences for report rewriting
- * Allows users to specify the report objective and writing style
+ * Allows users to specify the report objective and writing style via sliders or custom text
  */
 const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing, persistedCustomStyle, onCustomStyleChange, persistedObjective, onObjectiveChange }) => {
   const [objective, setObjective] = useState('');
-  const [style, setStyle] = useState('Formal & Technical');
-  const [customStyle, setCustomStyle] = useState('');
+  const [styleMode, setStyleMode] = useState('selector'); // 'selector' or 'custom'
+
+  // Slider positions (0-4, where 0 is left, 2 is middle, 4 is right)
+  const [casualFormal, setCasualFormal] = useState(2);
+  const [accessibleTechnical, setAccessibleTechnical] = useState(2);
+  const [briefThorough, setBriefThorough] = useState(2);
+
+  const [customStyleText, setCustomStyleText] = useState('');
   const [showError, setShowError] = useState(false);
 
-  // Initialize customStyle from persisted value when modal opens
+  // Initialize customStyleText from persisted value when modal opens
   useEffect(() => {
     if (isOpen && persistedCustomStyle) {
-      setCustomStyle(persistedCustomStyle);
+      setCustomStyleText(persistedCustomStyle);
     }
   }, [isOpen, persistedCustomStyle]);
 
@@ -26,15 +32,19 @@ const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing, persist
     }
   }, [isOpen, persistedObjective]);
 
-  const styleOptions = [
-    'Formal & Technical',
-    'Casual & Technical',
-    'Brief & Focused',
-    'Formal & Accessible',
-    'Casual & Accessible',
-    'Detailed & Thorough',
-    'Custom'
-  ];
+  // Generate style description based on slider positions
+  const generateStyleDescription = () => {
+    // Map slider values to descriptive terms
+    const formalityLevels = ['very casual', 'somewhat casual', 'moderately casual', 'somewhat formal', 'very formal'];
+    const technicalityLevels = ['very accessible', 'somewhat accessible', 'moderately accessible', 'somewhat technical', 'very technical'];
+    const lengthLevels = ['very brief', 'somewhat brief', 'balanced between brief and thorough', 'somewhat thorough', 'very thorough'];
+
+    const formality = formalityLevels[casualFormal];
+    const technicality = technicalityLevels[accessibleTechnical];
+    const length = lengthLevels[briefThorough];
+
+    return `Rewrite the report in a ${formality}, ${technicality} style, with an amount of text ${length}.`;
+  };
 
   // Handle ESC key to close modal
   useEffect(() => {
@@ -67,16 +77,22 @@ const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing, persist
 
     setShowError(false);
 
-    // Use customStyle if Custom is selected, otherwise use the selected style
-    const finalStyle = style === 'Custom' ? customStyle.trim() : style;
+    // Use customStyleText if Custom mode, otherwise use generated style description
+    const finalStyle = styleMode === 'custom' ? customStyleText.trim() : generateStyleDescription();
     await onRewrite(trimmedObjective, finalStyle);
 
-    // Reset form (but don't clear objective or customStyle - they're persisted)
-    setStyle('Formal & Technical');
+    // Reset to defaults
+    setStyleMode('selector');
+    setCasualFormal(2);
+    setAccessibleTechnical(2);
+    setBriefThorough(2);
   };
 
   const handleCancel = () => {
-    setStyle('Formal & Technical');
+    setStyleMode('selector');
+    setCasualFormal(2);
+    setAccessibleTechnical(2);
+    setBriefThorough(2);
     setShowError(false);
     onCancel();
   };
@@ -121,48 +137,138 @@ const ReportRewriteModal = ({ isOpen, onRewrite, onCancel, isProcessing, persist
           )}
         </div>
 
-        {/* Writing Style */}
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Writing Style
-          </label>
-          <div className="relative">
-            <select
-              value={style}
-              onChange={(e) => setStyle(e.target.value)}
+        {/* Style Mode Selector (centered) */}
+        <div className="flex justify-center mb-6">
+          <div
+            className="relative inline-flex items-center rounded-full"
+            style={{
+              width: '280px',
+              height: '36px',
+              backgroundColor: '#dcdce2'
+            }}
+          >
+            {/* Animated selector pill */}
+            <div
+              className="absolute rounded-full transition-all duration-300 ease-in-out"
+              style={{
+                width: '136px',
+                height: '32px',
+                backgroundColor: 'white',
+                boxShadow: '0px 1px 3px rgba(0, 0, 0, 0.1)',
+                left: styleMode === 'selector' ? '2px' : '142px',
+                top: '2px'
+              }}
+            />
+            {/* Buttons */}
+            <button
+              onClick={() => setStyleMode('selector')}
               disabled={isProcessing}
-              className="w-full px-4 py-2 pr-10 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3686c1] disabled:opacity-50 disabled:cursor-not-allowed appearance-none"
+              className="relative z-10 flex-1 h-full text-sm font-medium transition-colors duration-300"
+              style={{
+                color: styleMode === 'selector' ? '#111827' : '#6b7280'
+              }}
             >
-              {styleOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-            {/* Custom chevron icon */}
-            <div className="absolute inset-y-0 right-[8px] flex items-center pointer-events-none">
-              <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </div>
+              Style Selector
+            </button>
+            <button
+              onClick={() => setStyleMode('custom')}
+              disabled={isProcessing}
+              className="relative z-10 flex-1 h-full text-sm font-medium transition-colors duration-300"
+              style={{
+                color: styleMode === 'custom' ? '#111827' : '#6b7280'
+              }}
+            >
+              Custom Style
+            </button>
           </div>
+        </div>
 
-          {/* Custom Style Input - shown only when Custom is selected */}
-          {style === 'Custom' && (
+        {styleMode === 'selector' ? (
+          <>
+            {/* Slider Controls */}
+            <div className="mb-6 space-y-6">
+              {/* Casual - Formal Slider */}
+              <div className="flex items-center gap-4">
+                <span className="text-sm font-medium text-gray-700 w-24 text-right">Casual</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="4"
+                  step="1"
+                  value={casualFormal}
+                  onChange={(e) => setCasualFormal(parseInt(e.target.value))}
+                  disabled={isProcessing}
+                  className="flex-1 h-1 bg-gray-300 rounded-lg appearance-none cursor-pointer slider-with-detents"
+                  style={{
+                    background: `linear-gradient(to right, #cbd5e1 0%, #cbd5e1 ${(casualFormal / 4) * 100}%, #e5e7eb ${(casualFormal / 4) * 100}%, #e5e7eb 100%)`
+                  }}
+                />
+                <span className="text-sm font-medium text-gray-700 w-24">Formal</span>
+              </div>
+
+              {/* Accessible - Technical Slider */}
+              <div className="flex items-center gap-4">
+                <span className="text-sm font-medium text-gray-700 w-24 text-right">Accessible</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="4"
+                  step="1"
+                  value={accessibleTechnical}
+                  onChange={(e) => setAccessibleTechnical(parseInt(e.target.value))}
+                  disabled={isProcessing}
+                  className="flex-1 h-1 bg-gray-300 rounded-lg appearance-none cursor-pointer slider-with-detents"
+                  style={{
+                    background: `linear-gradient(to right, #cbd5e1 0%, #cbd5e1 ${(accessibleTechnical / 4) * 100}%, #e5e7eb ${(accessibleTechnical / 4) * 100}%, #e5e7eb 100%)`
+                  }}
+                />
+                <span className="text-sm font-medium text-gray-700 w-24">Technical</span>
+              </div>
+
+              {/* Brief - Thorough Slider */}
+              <div className="flex items-center gap-4">
+                <span className="text-sm font-medium text-gray-700 w-24 text-right">Brief</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="4"
+                  step="1"
+                  value={briefThorough}
+                  onChange={(e) => setBriefThorough(parseInt(e.target.value))}
+                  disabled={isProcessing}
+                  className="flex-1 h-1 bg-gray-300 rounded-lg appearance-none cursor-pointer slider-with-detents"
+                  style={{
+                    background: `linear-gradient(to right, #cbd5e1 0%, #cbd5e1 ${(briefThorough / 4) * 100}%, #e5e7eb ${(briefThorough / 4) * 100}%, #e5e7eb 100%)`
+                  }}
+                />
+                <span className="text-sm font-medium text-gray-700 w-24">Thorough</span>
+              </div>
+            </div>
+
+            {/* Read-only Style Description */}
+            <div className="mb-6">
+              <div className="w-full px-4 py-3 text-sm bg-gray-100 border border-gray-300 rounded-lg text-gray-600">
+                {generateStyleDescription()}
+              </div>
+            </div>
+          </>
+        ) : (
+          /* Custom Style Text Field */
+          <div className="mb-6">
             <textarea
-              value={customStyle}
+              value={customStyleText}
               onChange={(e) => {
                 const newValue = e.target.value;
-                setCustomStyle(newValue);
+                setCustomStyleText(newValue);
                 onCustomStyleChange(newValue);
               }}
-              placeholder=""
-              rows={6}
+              placeholder="Describe your desired writing style in your own words..."
+              rows={8}
               disabled={isProcessing}
-              className="mt-3 w-full px-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3686c1] resize-none disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full px-4 py-3 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3686c1] resize-none disabled:opacity-50 disabled:cursor-not-allowed"
             />
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Action Buttons */}
         <div className="flex justify-end gap-3">

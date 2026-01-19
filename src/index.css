@@ -432,3 +432,66 @@ code {
   background: #2a6a9a;
   z-index: 2; /* Always show max thumb on top when overlapping */
 }
+
+/* Report Rewrite Slider Styling */
+.slider-with-detents {
+  -webkit-appearance: none;
+  appearance: none;
+  outline: none;
+}
+
+.slider-with-detents::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: white;
+  border: 2px solid #3686c1;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.slider-with-detents::-webkit-slider-thumb:hover {
+  background: #f0f9ff;
+  transform: scale(1.1);
+}
+
+.slider-with-detents::-webkit-slider-thumb:active {
+  background: #3686c1;
+  transform: scale(0.95);
+}
+
+.slider-with-detents::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: white;
+  border: 2px solid #3686c1;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.slider-with-detents::-moz-range-thumb:hover {
+  background: #f0f9ff;
+  transform: scale(1.1);
+}
+
+.slider-with-detents::-moz-range-thumb:active {
+  background: #3686c1;
+  transform: scale(0.95);
+}
+
+.slider-with-detents:disabled::-webkit-slider-thumb {
+  background: #e5e7eb;
+  border-color: #9ca3af;
+  cursor: not-allowed;
+}
+
+.slider-with-detents:disabled::-moz-range-thumb {
+  background: #e5e7eb;
+  border-color: #9ca3af;
+  cursor: not-allowed;
+}
