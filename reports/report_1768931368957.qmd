@@ -1,0 +1,24 @@
+---
+title: "Nutrition_Physical_Activity_and_Obesity Dataset Analysis"
+date: "1/20/2026"
+format:
+  html:
+    theme: default
+    toc: false
+    embed-resources: true
+---
+
+This report presents 3 key findings from an analysis of Nutrition_Physical_Activity_and_Obesity. The analysis addressed 12 questions focused on exploring patterns, relationships, and insights within the data.
+
+![](plot_1768931368957_0_0.svg)
+
+This choropleth map displays adult obesity rates across the contiguous United States in 2023, with a color gradient ranging from green (lower rates) through yellow to red (higher rates). The visualization reveals a clear regional pattern, with Southeastern and Appalachian states showing the highest obesity prevalence (above 35%), while Western states like Colorado and coastal states tend to have lower rates.
+
+![](plot_1768931368957_1_0.svg)
+
+This radar chart compares five key health indicators between Colorado and West Virginia in 2023, with the polygon area representing overall health burden. West Virginia (red) shows substantially worse outcomes across all metrics—obesity, overweight status, physical inactivity, and low fruit and vegetable consumption—compared to Colorado (green), illustrating the stark health disparity between these two states.
+
+![](plot_1768931368957_2_0.svg)
+
+This grouped bar chart provides a detailed comparison of health indicators between Colorado and West Virginia in 2023, with percentage point differences annotated above each pair. West Virginia exceeds Colorado across all five metrics, with the largest gaps appearing in obesity (+12.5 percentage points), physical inactivity, and low fruit consumption, quantifying the significant health outcome disparities between these states.
+

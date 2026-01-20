@@ -1,0 +1,259 @@
+---
+title: "Nutrition_Physical_Activity_and_Obesity Dataset Analysis"
+date: "1/20/2026"
+format:
+  html:
+    theme: default
+    toc: false
+    embed-resources: true
+---
+
+```{=html}
+<style>
+.code-section {
+  margin: 20px 0;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  background: #f9fafb;
+}
+.code-toggle {
+  padding: 12px 16px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #374151;
+  user-select: none;
+  list-style: none;
+}
+.code-toggle::-webkit-details-marker {
+  display: none;
+}
+.code-toggle::before {
+  content: '▶';
+  display: inline-block;
+  margin-right: 8px;
+  font-size: 0.75rem;
+  transition: transform 0.2s ease;
+}
+details[open] .code-toggle::before {
+  transform: rotate(90deg);
+}
+.code-toggle:hover {
+  background: #f3f4f6;
+}
+.code-section pre {
+  margin: 0;
+  padding: 16px;
+  background: #1f2937;
+  color: #e5e7eb;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  overflow-x: auto;
+  border-top: 1px solid #d0d0d0;
+}
+</style>
+```
+
+This report presents 3 key findings from an analysis of Nutrition_Physical_Activity_and_Obesity. The analysis addressed 12 questions focused on exploring patterns, relationships, and insights within the data.
+
+![](plot_1768935267674_0_0.svg)
+
+This choropleth map displays adult obesity rates across the continental United States in 2023, with colors ranging from green (lower rates) through yellow to red (higher rates). A clear regional pattern emerges, with southeastern and midwestern states showing the highest obesity prevalence (above 35%), while western and northeastern states generally report lower rates, highlighting significant geographic disparities in obesity across the country.
+
+<details class="code-section">
+<summary class="code-toggle">View Code</summary>
+
+```r
+library(ggplot2)
+library(dplyr)
+library(maps)
+
+# Get 2023 obesity rates by state
+obesity_2023 <- Nutrition_Physical_Activity_and_Obesity %>%
+  filter(QuestionID == "Q036",
+         StratificationCategory1 == "Total",
+         !LocationAbbr %in% c("US", "GU", "PR", "VI"),
+         YearStart == 2023) %>%
+  group_by(LocationAbbr, LocationDesc) %>%
+  summarise(Obesity_Rate = mean(Data_Value, na.rm = TRUE), .groups = "drop") %>%
+  mutate(region = tolower(LocationDesc))
+
+# Get US state map data
+us_states <- map_data("state")
+
+# Merge obesity data with map data
+map_data_merged <- us_states %>%
+  left_join(obesity_2023, by = "region")
+
+# Create choropleth map
+ggplot(map_data_merged, aes(x = long, y = lat, group = group, fill = Obesity_Rate)) +
+  geom_polygon(color = "white", linewidth = 0.2) +
+  scale_fill_gradient2(low = "#2A9D8F", 
+                       mid = "#E9C46A", 
+                       high = "#E63946",
+                       midpoint = 33,
+                       name = "Obesity\nRate (%)",
+                       labels = function(x) paste0(x, "%"),
+                       na.value = "gray90") +
+  coord_fixed(1.3) +
+  labs(title = "Adult Obesity Rates by State (2023)",
+       subtitle = "Percent of adults aged 18+ with obesity classification",
+       caption = "Source: Behavioral Risk Factor Surveillance System\nNote: Alaska, Hawaii, and territories not shown") +
+  theme_void() +
+  theme(plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5, color = "gray40"),
+        legend.position = "right",
+        plot.margin = margin(10, 10, 10, 10))
+```
+
+</details>
+
+![](plot_1768935267674_1_0.svg)
+
+This radar chart compares five key health indicators between Colorado and West Virginia in 2023, where smaller polygon areas indicate better overall health outcomes. Colorado (green) consistently outperforms West Virginia (red) across all metrics including obesity, overweight status, physical inactivity, and fruit and vegetable consumption, with West Virginia's larger polygon showing notably higher rates of adverse health behaviors.
+
+<details class="code-section">
+<summary class="code-toggle">View Code</summary>
+
+```r
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Get 2023 data for West Virginia and Colorado across multiple indicators
+health_data <- Nutrition_Physical_Activity_and_Obesity %>%
+  filter(LocationAbbr %in% c("WV", "CO"),
+         StratificationCategory1 == "Total",
+         YearStart == 2023,
+         QuestionID %in% c("Q036", "Q037", "Q047", "Q018", "Q019")) %>%
+  group_by(LocationAbbr, LocationDesc, QuestionID, Question) %>%
+  summarise(Value = mean(Data_Value, na.rm = TRUE), .groups = "drop")
+
+# Create short labels for the metrics
+health_data <- health_data %>%
+  mutate(Metric = case_when(
+    QuestionID == "Q036" ~ "Obesity",
+    QuestionID == "Q037" ~ "Overweight",
+    QuestionID == "Q047" ~ "No Leisure\nPhysical Activity",
+    QuestionID == "Q018" ~ "Low Fruit\nConsumption",
+    QuestionID == "Q019" ~ "Low Vegetable\nConsumption",
+    TRUE ~ QuestionID
+  ))
+
+# Prepare data for radar chart (using coord_polar)
+radar_data <- health_data %>%
+  select(LocationDesc, Metric, Value) %>%
+  # Add first point again to close the polygon
+  group_by(LocationDesc) %>%
+  arrange(Metric) %>%
+  group_modify(~ bind_rows(.x, .x[1,])) %>%
+  ungroup() %>%
+  mutate(Metric_num = as.numeric(factor(Metric)))
+
+# Create radar/spider chart using coord_polar
+ggplot(radar_data, aes(x = Metric, y = Value, group = LocationDesc, color = LocationDesc)) +
+  geom_polygon(aes(fill = LocationDesc), alpha = 0.2, linewidth = 1.2) +
+  geom_point(size = 3) +
+  scale_color_manual(values = c("Colorado" = "#2A9D8F", "West Virginia" = "#E63946")) +
+  scale_fill_manual(values = c("Colorado" = "#2A9D8F", "West Virginia" = "#E63946")) +
+  scale_y_continuous(limits = c(0, 50), breaks = seq(0, 50, 10)) +
+  coord_polar(start = 0) +
+  labs(title = "Health Indicators: Colorado vs West Virginia (2023)",
+       subtitle = "Lower values indicate better health outcomes across all metrics",
+       color = "State",
+       fill = "State",
+       caption = "Source: Behavioral Risk Factor Surveillance System") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 13, hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5, color = "gray40", size = 10),
+        axis.title = element_blank(),
+        axis.text.y = element_text(size = 8),
+        axis.text.x = element_text(size = 9, face = "bold"),
+        legend.position = "bottom",
+        panel.grid.major = element_line(color = "gray85"))
+```
+
+</details>
+
+![](plot_1768935267674_2_0.svg)
+
+This grouped bar chart provides a direct side-by-side comparison of five health metrics between Colorado and West Virginia in 2023, with percentage point differences annotated above each pair. West Virginia shows substantially worse outcomes across all indicators, with the largest gaps appearing in obesity (+15.4 percentage points) and physical inactivity (+12.8 percentage points), demonstrating a consistent pattern of health disparities between these two states.
+
+<details class="code-section">
+<summary class="code-toggle">View Code</summary>
+
+```r
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Get 2023 data for West Virginia and Colorado across multiple indicators
+health_data <- Nutrition_Physical_Activity_and_Obesity %>%
+  filter(LocationAbbr %in% c("WV", "CO"),
+         StratificationCategory1 == "Total",
+         YearStart == 2023,
+         QuestionID %in% c("Q036", "Q037", "Q047", "Q018", "Q019")) %>%
+  group_by(LocationAbbr, LocationDesc, QuestionID) %>%
+  summarise(Value = mean(Data_Value, na.rm = TRUE), .groups = "drop")
+
+# Create short labels for the metrics
+health_data <- health_data %>%
+  mutate(Metric = case_when(
+    QuestionID == "Q036" ~ "Obesity",
+    QuestionID == "Q037" ~ "Overweight",
+    QuestionID == "Q047" ~ "No Leisure\nPhysical Activity",
+    QuestionID == "Q018" ~ "Low Fruit\nConsumption",
+    QuestionID == "Q019" ~ "Low Vegetable\nConsumption",
+    TRUE ~ QuestionID
+  )) %>%
+  mutate(Metric = factor(Metric, levels = c("Obesity", "Overweight", 
+                                             "No Leisure\nPhysical Activity",
+                                             "Low Fruit\nConsumption", 
+                                             "Low Vegetable\nConsumption")))
+
+# Calculate the difference
+difference_data <- health_data %>%
+  select(LocationDesc, Metric, Value) %>%
+  pivot_wider(names_from = LocationDesc, values_from = Value) %>%
+  mutate(Difference = `West Virginia` - Colorado)
+
+# Create grouped bar chart
+ggplot(health_data, aes(x = Metric, y = Value, fill = LocationDesc)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  geom_text(aes(label = sprintf("%.1f%%", Value)),
+            position = position_dodge(width = 0.8),
+            vjust = -0.5, size = 3.2, fontface = "bold") +
+  # Add difference annotations
+  geom_segment(data = difference_data,
+               aes(x = as.numeric(Metric) - 0.15, 
+                   xend = as.numeric(Metric) + 0.15,
+                   y = pmax(Colorado, `West Virginia`) + 3,
+                   yend = pmax(Colorado, `West Virginia`) + 3),
+               inherit.aes = FALSE, color = "gray40", linewidth = 0.5) +
+  geom_text(data = difference_data,
+            aes(x = Metric, 
+                y = pmax(Colorado, `West Virginia`) + 5.5,
+                label = sprintf("+%.1f pp", Difference)),
+            inherit.aes = FALSE, size = 3, color = "#E63946", fontface = "bold") +
+  scale_fill_manual(values = c("Colorado" = "#2A9D8F", "West Virginia" = "#E63946")) +
+  scale_y_continuous(limits = c(0, 55), 
+                     labels = function(x) paste0(x, "%"),
+                     expand = expansion(mult = c(0, 0.05))) +
+  labs(title = "Health Indicators: Colorado vs West Virginia (2023)",
+       subtitle = "Red values show the percentage point difference (WV - CO)",
+       x = NULL,
+       y = "Percentage of Adults",
+       fill = "State",
+       caption = "Source: Behavioral Risk Factor Surveillance System") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 13),
+        plot.subtitle = element_text(color = "gray40"),
+        axis.text.x = element_text(size = 9, face = "bold"),
+        legend.position = "top",
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor = element_blank())
+```
+
+</details>
+

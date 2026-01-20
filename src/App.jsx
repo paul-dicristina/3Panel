@@ -737,6 +737,11 @@ Please respond with a JSON object in this format:
         // Use existing HTML/Quarto export
         endpoint = '/api/create-quarto-report';
         exportData = generateQuartoReport(messages, codeCards, favoritedCardIds, descriptions);
+        console.log('[Export] Generated export data:', {
+          findingsCount: exportData.findings?.length || 0,
+          findingsWithCode: exportData.findings?.filter(f => f.code).length || 0,
+          firstFindingHasCode: exportData.findings?.[0]?.code ? true : false
+        });
       } else if (format === 'quarto' || format === 'jupyter') {
         // Use new export endpoints with full code
         endpoint = format === 'quarto' ? '/api/export-quarto' : '/api/export-jupyter';
@@ -904,6 +909,7 @@ Please respond with a JSON object in this format:
       }
 
       const finding = {
+        cardId: card.id, // Include card ID for code matching
         title: null, // Will be extracted from SVG title tag
         description: descriptions[index] || 'This visualization shows the relationship between the variables in the dataset.',
         code: card.code,
@@ -914,6 +920,8 @@ Please respond with a JSON object in this format:
 
       // Debug log each finding
       console.log(`Finding ${index + 1}:`, {
+        hasCode: !!finding.code,
+        codeLength: finding.code?.length || 0,
         hasPlots: finding.plots.length > 0,
         plotCount: finding.plots.length,
         hasTables: finding.tables.length > 0,
@@ -943,6 +951,7 @@ Please respond with a JSON object in this format:
       date: timestamp,
       summary,
       findings,
+      codeCards, // Include all code cards for code matching
       hasQuarto: false // Will be detected by backend
     };
   };

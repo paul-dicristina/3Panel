@@ -29,7 +29,9 @@
       "Bash(git push:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(node server.js:*)"
+      "Bash(node server.js:*)",
+      "Bash(npm start)",
+      "Bash(node -c:*)"
     ],
     "deny": [],
     "ask": []

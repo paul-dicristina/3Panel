@@ -3594,6 +3594,53 @@ format:
     embed-resources: true
 ---
 
+\`\`\`{=html}
+<style>
+.code-section {
+  margin: 20px 0;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  background: #f9fafb;
+}
+.code-toggle {
+  padding: 12px 16px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #374151;
+  user-select: none;
+  list-style: none;
+}
+.code-toggle::-webkit-details-marker {
+  display: none;
+}
+.code-toggle::before {
+  content: '▶';
+  display: inline-block;
+  margin-right: 8px;
+  font-size: 0.75rem;
+  transition: transform 0.2s ease;
+}
+details[open] .code-toggle::before {
+  transform: rotate(90deg);
+}
+.code-toggle:hover {
+  background: #f3f4f6;
+}
+.code-section pre {
+  margin: 0;
+  padding: 16px;
+  background: #f5f5f5;
+  color: #1f2937;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  overflow-x: auto;
+  border-top: 1px solid #d0d0d0;
+}
+</style>
+\`\`\`
+
 `;
 
   // Add summary if provided
@@ -3642,6 +3689,14 @@ format:
           qmdContent += `${finding.description}\n\n`;
         }
       }
+
+      // Add code section if code exists (after plots, before tables)
+      if (finding.code && finding.plots && finding.plots.length > 0) {
+        qmdContent += `<details class="code-section">\n`;
+        qmdContent += `<summary class="code-toggle">View Code</summary>\n\n`;
+        qmdContent += `\`\`\`r\n${finding.code}\n\`\`\`\n\n`;
+        qmdContent += `</details>\n\n`;
+      }
     }
 
     // Add tables
@@ -3662,6 +3717,14 @@ format:
       // Add description after tables
       if (finding.description) {
         qmdContent += `${finding.description}\n\n`;
+      }
+
+      // Add code section if code exists (after tables)
+      if (finding.code) {
+        qmdContent += `<details class="code-section">\n`;
+        qmdContent += `<summary class="code-toggle">View Code</summary>\n\n`;
+        qmdContent += `\`\`\`r\n${finding.code}\n\`\`\`\n\n`;
+        qmdContent += `</details>\n\n`;
       }
     }
   }
@@ -3795,7 +3858,16 @@ ${datasetCode}
 // Create Quarto report endpoint with HTML fallback
 app.post('/api/create-quarto-report', async (req, res) => {
   try {
-    const { title, date, findings, summary } = req.body;
+    console.log('='.repeat(60));
+    console.log('=== /api/create-quarto-report ENDPOINT HIT ===');
+    console.log('='.repeat(60));
+    console.log('Request body keys:', Object.keys(req.body));
+    console.log('Findings array length:', req.body.findings?.length);
+    console.log('codeCards present:', !!req.body.codeCards);
+    console.log('First finding structure:', JSON.stringify(req.body.findings?.[0], null, 2));
+    console.log('='.repeat(60));
+
+    const { title, date, findings, summary, codeCards } = req.body;
 
     if (!title || !findings) {
       return res.status(400).json({ error: 'Missing required report data (title, findings)' });
@@ -3853,6 +3925,12 @@ app.post('/api/create-quarto-report', async (req, res) => {
 
     // Generate findings sections
     const findingsHTML = findings.map((finding, index) => {
+      console.log(`[HTML Export] Finding ${index}:`, {
+        hasCode: !!finding.code,
+        codeLength: finding.code?.length || 0,
+        codePreview: finding.code?.substring(0, 50) || 'no code'
+      });
+
       let sectionHTML = `
       <div class="finding">`;
 
@@ -3937,6 +4015,26 @@ app.post('/api/create-quarto-report', async (req, res) => {
           sectionHTML += `
         <p class="plot-description">${finding.description}</p>`;
         }
+      }
+
+      // Add collapsible code section if code exists in the finding
+      if (finding.code) {
+        console.log(`[HTML Export] Adding code section for finding ${index}`);
+        // Escape HTML in code
+        const escapedCode = finding.code
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+
+        sectionHTML += `
+        <details class="code-section">
+          <summary class="code-toggle">View Code</summary>
+          <pre class="code-block"><code>${escapedCode}</code></pre>
+        </details>`;
+      } else {
+        console.log(`[HTML Export] NO CODE for finding ${index} - finding.code is:`, finding.code);
       }
 
       sectionHTML += `
@@ -4037,6 +4135,53 @@ app.post('/api/create-quarto-report', async (req, res) => {
     .table-container th {
       background: #f7fafc;
       font-weight: 600;
+    }
+    .code-section {
+      margin: 20px 0;
+      border: 1px solid #d0d0d0;
+      border-radius: 4px;
+      background: #f9fafb;
+    }
+    .code-toggle {
+      padding: 12px 16px;
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: #374151;
+      user-select: none;
+      list-style: none;
+    }
+    .code-toggle::-webkit-details-marker {
+      display: none;
+    }
+    .code-toggle::before {
+      content: '▶';
+      display: inline-block;
+      margin-right: 8px;
+      font-size: 0.75rem;
+      transition: transform 0.2s ease;
+    }
+    details[open] .code-toggle::before {
+      transform: rotate(90deg);
+    }
+    .code-toggle:hover {
+      background: #f3f4f6;
+    }
+    .code-block {
+      margin: 0;
+      padding: 16px;
+      background: #f5f5f5;
+      color: #1f2937;
+      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+      font-size: 0.8125rem;
+      line-height: 1.6;
+      overflow-x: auto;
+      border-top: 1px solid #d0d0d0;
+    }
+    .code-block code {
+      background: none;
+      padding: 0;
+      color: inherit;
     }
   </style>
 </head>
