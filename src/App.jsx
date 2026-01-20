@@ -2117,10 +2117,22 @@ Respond with ONLY a JSON code block in this format:
 
     } catch (error) {
       console.error('[Rewrite Report] Error:', error);
-      alert(
-        `Failed to rewrite report: ${error.message}\n\n` +
-        `Try again or rephrase your objective.`
-      );
+
+      // Check if it's a 529 API overload error
+      const is529Error = error.message.includes('529');
+
+      if (is529Error) {
+        alert(
+          `The AI service is temporarily overloaded (Error 529).\n\n` +
+          `This is a temporary issue with Anthropic's API.\n\n` +
+          `Please wait 30-60 seconds and try again.`
+        );
+      } else {
+        alert(
+          `Failed to rewrite report: ${error.message}\n\n` +
+          `Try again or rephrase your objective.`
+        );
+      }
     } finally {
       setIsRewriteProcessing(false);
     }

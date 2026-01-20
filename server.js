@@ -148,7 +148,13 @@ Numeric columns: ${numericColumns.join(', ') || 'none'}
 Categorical columns with values:
 ${categoricalColumnsWithValues.map(c => `  - ${c}`).join('\n') || 'none'}
 
-⚠️  CRITICAL: When writing R code that references this dataset, you MUST use the name "${activeDatasetName || 'data'}".
+🚨 CRITICAL DATASET VARIABLE NAME REQUIREMENT:
+${activeDatasetName
+  ? `When writing R code, you MUST use the exact variable name: ${activeDatasetName}
+   DO NOT use generic names like "data", "df", or "dataset" - use "${activeDatasetName}" exactly!`
+  : `A dataset exists but no active dataset name was provided. You MUST check the conversation history to find the exact variable name.
+   NEVER use generic names like "data", "df", or "dataset" - find and use the EXACT variable name from when the dataset was loaded!`}
+
 ⚠️  CRITICAL: When writing R code that references column names, you MUST use the EXACT column names shown above.
 DO NOT infer, guess, or fabricate column names. For example, if you see "TARGET: [Iris-setosa, ...]", the column name is TARGET, NOT "SPECIES" or any other name you might infer from the values.`;
     }
@@ -192,7 +198,10 @@ KEY RULES:
 2. If the user loaded data in ANY previous message in this conversation, it STILL EXISTS in the workspace
 3. BEFORE loading data, CHECK THE CONVERSATION HISTORY - if data was already loaded, DO NOT reload it
 4. Libraries (ggplot2, dplyr, etc.) DO NOT persist - always call library() when needed
-5. When analyzing data that was loaded earlier, just use the variable name directly
+5. When analyzing data that was loaded earlier, you MUST use the EXACT variable name from when it was loaded
+   - DO NOT use generic names like "data", "df", or "dataset"
+   - SCAN conversation history for the exact filename (e.g., "lex.csv")
+   - USE the exact variable name (e.g., "lex") in your code
 
 CRITICAL - SNOWFLAKE DATABASE CONNECTIONS:
 A Snowflake helper file (snowflake_helper.R) is AUTOMATICALLY loaded with every R execution.
@@ -243,41 +252,86 @@ IMPORTANT NOTES:
 - If you get a "No active warehouse" error, use sf_use(warehouse="WAREHOUSE_NAME") to set one
 - The helper automatically includes warehouse/database/schema in connections, so context persists across queries
 
-CRITICAL - DATASET VARIABLE NAMING CONVENTION:
-When datasets are loaded via the load-data button, they follow a strict naming convention:
-- Variable name = filename without the .csv extension, with ALL special characters (hyphens, spaces, dots, etc.) replaced by underscores
-- Example: "lex.csv" → variable is "lex"
-- Example: "population_data.csv" → variable is "population_data"
-- Example: "my-dataset.csv" → variable is "my_dataset" (hyphen becomes underscore)
-- Example: "Nutrition__Physical_Activity__and_Obesity_-_Behavioral_Risk_Factor_Surveillance_System.csv" → variable is "Nutrition__Physical_Activity__and_Obesity___Behavioral_Risk_Factor_Surveillance_System"
+⚠️⚠️⚠️ CRITICAL - DATASET VARIABLE NAMING CONVENTION ⚠️⚠️⚠️
 
-When the user asks you to work with a dataset:
-1. LOOK BACK in the conversation history for when the dataset was loaded
-2. FIND the filename (e.g., "lex.csv" or "my-data.csv")
-3. REMOVE the .csv extension and replace ALL special characters with underscores (e.g., "lex" or "my_data")
-4. USE that variable name in your code
+🚨 ABSOLUTELY FORBIDDEN - NEVER USE THESE GENERIC VARIABLE NAMES:
+- ❌ data
+- ❌ df
+- ❌ dataset
+- ❌ my_data
+- ❌ temp
+- ❌ result
 
-Example:
+These names are BANNED. If you use them, your code WILL FAIL because the dataset doesn't exist under that name!
+
+⚠️ MANDATORY REQUIREMENT:
+When generating R code, you MUST use the EXACT dataset variable name from the conversation history.
+DO NOT make up names. DO NOT use generic names. DO NOT assume names.
+
+🔍 HOW TO FIND THE CORRECT VARIABLE NAME:
+
+Step 1: SCAN the conversation history for when the dataset was loaded
+Step 2: IDENTIFY the exact filename (e.g., "lex.csv", "Nutrition__Physical_Activity__and_Obesity_-_Behavioral_Risk_Factor_Surveillance_System.csv")
+Step 3: APPLY the naming convention:
+  - Remove the .csv extension
+  - Replace ALL special characters (hyphens, spaces, dots, etc.) with underscores
+  - Keep the exact case and structure
+Step 4: USE that exact variable name in ALL your code
+
+📋 NAMING CONVENTION EXAMPLES:
+- "lex.csv" → variable is "lex"
+- "population_data.csv" → variable is "population_data"
+- "my-dataset.csv" → variable is "my_dataset" (hyphen becomes underscore)
+- "Nutrition__Physical_Activity__and_Obesity_-_Behavioral_Risk_Factor_Surveillance_System.csv" → variable is "Nutrition__Physical_Activity__and_Obesity___Behavioral_Risk_Factor_Surveillance_System"
+
+✅ CORRECT WORKFLOW:
 User loads: "lex.csv"
+System message: "Dataset 'lex' loaded with 3 columns..."
 Variable is: lex
-User asks: "Pivot lex to long format"
-You generate: "lex_long <- lex %>% pivot_longer(...)"  <-- Use lex, not lex_data!
 
-CORRECT workflow example:
+User asks: "Create a plot of life expectancy over time"
+You generate: ggplot(lex, aes(x = year, y = life_expectancy)) + geom_line()  ← Uses "lex"!
+
+✅ ANOTHER CORRECT EXAMPLE:
+User loads: "Nutrition__Physical_Activity__and_Obesity_-_Behavioral_Risk_Factor_Surveillance_System.csv"
+Variable is: Nutrition__Physical_Activity__and_Obesity___Behavioral_Risk_Factor_Surveillance_System
+
+User asks: "Filter for obesity data"
+You generate: obesity_data <- Nutrition__Physical_Activity__and_Obesity___Behavioral_Risk_Factor_Surveillance_System %>% filter(...)  ← Uses exact name!
+
+❌ WRONG APPROACH (COMMON MISTAKES):
+User loads: "lex.csv"
+User asks: "Create a plot"
+You generate: ggplot(data, aes(...))  ← WRONG! There is no variable called "data"!
+You generate: ggplot(df, aes(...))  ← WRONG! There is no variable called "df"!
+You generate: ggplot(dataset, aes(...))  ← WRONG! There is no variable called "dataset"!
+
+❌ ANOTHER COMMON MISTAKE:
+User loads: "Nutrition__Physical_Activity__and_Obesity_-_Behavioral_Risk_Factor_Surveillance_System.csv"
+User asks: "Show obesity rates"
+You generate: data %>% filter(...)  ← WRONG! You MUST use the full variable name!
+
+🔄 REUSING EXISTING DATASETS:
 User: "Load population data from URL into variable pop"
-You: Generate code that loads: pop <- read.csv(url(...))
+You: pop <- read.csv(url(...))
 
 User: "Show me the first 20 rows"
-You: Generate code: head(pop, 20)   <-- DO NOT reload pop, it exists!
+You: head(pop, 20)   ← CORRECT! Reuses existing "pop" variable
 
 User: "Create a plot of Canada's population"
-You: Generate code: library(ggplot2); ggplot(subset(pop, Country.Name=="Canada"), ...)  <-- Use existing pop!
+You: ggplot(subset(pop, Country.Name=="Canada"), ...)  ← CORRECT! Uses existing "pop"!
 
-WRONG approach (DO NOT DO THIS):
+❌ WRONG - DON'T RELOAD:
 User: "Create a plot of Canada's population"
-You: pop <- read.csv(url(...))  <-- WRONG! Data already exists from earlier!
+You: pop <- read.csv(url(...))  ← WRONG! Data already exists!
 
-Check conversation history first. If data was loaded before, reuse it. Only load data if it's the FIRST time.
+🎯 GOLDEN RULE:
+Before writing ANY R code that references a dataset:
+1. Check conversation history for the dataset load event
+2. Find the exact filename
+3. Convert to variable name using the naming convention
+4. Use that EXACT name in your code
+5. NEVER use generic names like "data", "df", or "dataset"
 
 CRITICAL - AVOIDING DATASET CONFUSION:
 When working with MULTIPLE datasets in the same conversation, be EXTREMELY CAREFUL not to confuse them:

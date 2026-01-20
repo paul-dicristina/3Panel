@@ -1,0 +1,212 @@
+---
+title: "Behavioral Determinants of Obesity: U.S. State-Level Epidemiological Analysis"
+date: "1/20/2026"
+format:
+  html:
+    embed-resources: true
+    theme: default
+    toc: false
+    code-fold: false
+---
+
+## Setup
+
+```{r setup}
+#| include: false
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(scales)
+```
+
+```{r load-data}
+# Load CSV file (ensure Nutrition_Physical_Activity_and_Obesity.csv is in working directory)
+data <- read.csv("Nutrition_Physical_Activity_and_Obesity.csv")
+
+```
+
+## Spatial Distribution of Adult Obesity Prevalence
+
+The 2023 choropleth demonstrates substantial spatial heterogeneity in adult obesity prevalence, with state-level estimates ranging from approximately 23-25% (Colorado, Massachusetts) to >40% (West Virginia, Mississippi, Louisiana). The geographic clustering—characterized by elevated prevalence in Southeastern and Midwestern states contrasted with lower rates in Western and Northeastern regions—is consistent with the hypothesis that regional socioeconomic gradients and built environment characteristics contribute to population-level obesity risk independent of individual-level determinants.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(maps)
+
+# Get 2023 obesity rates by state
+obesity_2023 <- Nutrition_Physical_Activity_and_Obesity %>%
+  filter(QuestionID == "Q036",
+         StratificationCategory1 == "Total",
+         !LocationAbbr %in% c("US", "GU", "PR", "VI"),
+         YearStart == 2023) %>%
+  group_by(LocationAbbr, LocationDesc) %>%
+  summarise(Obesity_Rate = mean(Data_Value, na.rm = TRUE), .groups = "drop") %>%
+  mutate(region = tolower(LocationDesc))
+
+# Get US state map data
+us_states <- map_data("state")
+
+# Merge obesity data with map data
+map_data_merged <- us_states %>%
+  left_join(obesity_2023, by = "region")
+
+# Create choropleth map
+ggplot(map_data_merged, aes(x = long, y = lat, group = group, fill = Obesity_Rate)) +
+  geom_polygon(color = "white", linewidth = 0.2) +
+  scale_fill_gradient2(low = "#2A9D8F", 
+                       mid = "#E9C46A", 
+                       high = "#E63946",
+                       midpoint = 33,
+                       name = "Obesity\nRate (%)",
+                       labels = function(x) paste0(x, "%"),
+                       na.value = "gray90") +
+  coord_fixed(1.3) +
+  labs(title = "Adult Obesity Rates by State (2023)",
+       subtitle = "Percent of adults aged 18+ with obesity classification",
+       caption = "Source: Behavioral Risk Factor Surveillance System\nNote: Alaska, Hawaii, and territories not shown") +
+  theme_void() +
+  theme(plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5, color = "gray40"),
+        legend.position = "right",
+        plot.margin = margin(10, 10, 10, 10))
+```
+
+## Multi-Indicator Health Profile Comparison: Extreme Cases
+
+Radar plot visualization comparing Colorado (lowest obesity prevalence) and West Virginia (highest obesity prevalence) across five health indicators in 2023 reveals systematic divergence across all measured domains. West Virginia demonstrates uniformly worse outcomes, with maximum separation observed for physical inactivity and obesity prevalence metrics. The consistent directionality of effects across behavioral (diet, activity) and outcome (obesity, overweight) indicators supports mechanistic linkage between these variables rather than independent variation.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Get 2023 data for West Virginia and Colorado across multiple indicators
+health_data <- Nutrition_Physical_Activity_and_Obesity %>%
+  filter(LocationAbbr %in% c("WV", "CO"),
+         StratificationCategory1 == "Total",
+         YearStart == 2023,
+         QuestionID %in% c("Q036", "Q037", "Q047", "Q018", "Q019")) %>%
+  group_by(LocationAbbr, LocationDesc, QuestionID, Question) %>%
+  summarise(Value = mean(Data_Value, na.rm = TRUE), .groups = "drop")
+
+# Create short labels for the metrics
+health_data <- health_data %>%
+  mutate(Metric = case_when(
+    QuestionID == "Q036" ~ "Obesity",
+    QuestionID == "Q037" ~ "Overweight",
+    QuestionID == "Q047" ~ "No Leisure\nPhysical Activity",
+    QuestionID == "Q018" ~ "Low Fruit\nConsumption",
+    QuestionID == "Q019" ~ "Low Vegetable\nConsumption",
+    TRUE ~ QuestionID
+  ))
+
+# Prepare data for radar chart (using coord_polar)
+radar_data <- health_data %>%
+  select(LocationDesc, Metric, Value) %>%
+  # Add first point again to close the polygon
+  group_by(LocationDesc) %>%
+  arrange(Metric) %>%
+  group_modify(~ bind_rows(.x, .x[1,])) %>%
+  ungroup() %>%
+  mutate(Metric_num = as.numeric(factor(Metric)))
+
+# Create radar/spider chart using coord_polar
+ggplot(radar_data, aes(x = Metric, y = Value, group = LocationDesc, color = LocationDesc)) +
+  geom_polygon(aes(fill = LocationDesc), alpha = 0.2, linewidth = 1.2) +
+  geom_point(size = 3) +
+  scale_color_manual(values = c("Colorado" = "#2A9D8F", "West Virginia" = "#E63946")) +
+  scale_fill_manual(values = c("Colorado" = "#2A9D8F", "West Virginia" = "#E63946")) +
+  scale_y_continuous(limits = c(0, 50), breaks = seq(0, 50, 10)) +
+  coord_polar(start = 0) +
+  labs(title = "Health Indicators: Colorado vs West Virginia (2023)",
+       subtitle = "Lower values indicate better health outcomes across all metrics",
+       color = "State",
+       fill = "State",
+       caption = "Source: Behavioral Risk Factor Surveillance System") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 13, hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5, color = "gray40", size = 10),
+        axis.title = element_blank(),
+        axis.text.y = element_text(size = 8),
+        axis.text.x = element_text(size = 9, face = "bold"),
+        legend.position = "bottom",
+        panel.grid.major = element_line(color = "gray85"))
+```
+
+## Effect Size Quantification: State-Level Differentials
+
+Pairwise comparison between West Virginia and Colorado yields substantial between-state differentials: obesity prevalence (+11.5 percentage points), leisure-time physical inactivity (+11.9 pp), and inadequate vegetable consumption (+10.5 pp). The magnitude of these effect sizes—representing approximately 40-50% relative differences—constitutes epidemiologically significant disparities with direct implications for state-level resource allocation and intervention targeting. The co-occurrence of elevated physical inactivity with increased obesity prevalence is consistent with established dose-response relationships in the physical activity epidemiology literature.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Get 2023 data for West Virginia and Colorado across multiple indicators
+health_data <- Nutrition_Physical_Activity_and_Obesity %>%
+  filter(LocationAbbr %in% c("WV", "CO"),
+         StratificationCategory1 == "Total",
+         YearStart == 2023,
+         QuestionID %in% c("Q036", "Q037", "Q047", "Q018", "Q019")) %>%
+  group_by(LocationAbbr, LocationDesc, QuestionID) %>%
+  summarise(Value = mean(Data_Value, na.rm = TRUE), .groups = "drop")
+
+# Create short labels for the metrics
+health_data <- health_data %>%
+  mutate(Metric = case_when(
+    QuestionID == "Q036" ~ "Obesity",
+    QuestionID == "Q037" ~ "Overweight",
+    QuestionID == "Q047" ~ "No Leisure\nPhysical Activity",
+    QuestionID == "Q018" ~ "Low Fruit\nConsumption",
+    QuestionID == "Q019" ~ "Low Vegetable\nConsumption",
+    TRUE ~ QuestionID
+  )) %>%
+  mutate(Metric = factor(Metric, levels = c("Obesity", "Overweight", 
+                                             "No Leisure\nPhysical Activity",
+                                             "Low Fruit\nConsumption", 
+                                             "Low Vegetable\nConsumption")))
+
+# Calculate the difference
+difference_data <- health_data %>%
+  select(LocationDesc, Metric, Value) %>%
+  pivot_wider(names_from = LocationDesc, values_from = Value) %>%
+  mutate(Difference = `West Virginia` - Colorado)
+
+# Create grouped bar chart
+ggplot(health_data, aes(x = Metric, y = Value, fill = LocationDesc)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  geom_text(aes(label = sprintf("%.1f%%", Value)),
+            position = position_dodge(width = 0.8),
+            vjust = -0.5, size = 3.2, fontface = "bold") +
+  # Add difference annotations
+  geom_segment(data = difference_data,
+               aes(x = as.numeric(Metric) - 0.15, 
+                   xend = as.numeric(Metric) + 0.15,
+                   y = pmax(Colorado, `West Virginia`) + 3,
+                   yend = pmax(Colorado, `West Virginia`) + 3),
+               inherit.aes = FALSE, color = "gray40", linewidth = 0.5) +
+  geom_text(data = difference_data,
+            aes(x = Metric, 
+                y = pmax(Colorado, `West Virginia`) + 5.5,
+                label = sprintf("+%.1f pp", Difference)),
+            inherit.aes = FALSE, size = 3, color = "#E63946", fontface = "bold") +
+  scale_fill_manual(values = c("Colorado" = "#2A9D8F", "West Virginia" = "#E63946")) +
+  scale_y_continuous(limits = c(0, 55), 
+                     labels = function(x) paste0(x, "%"),
+                     expand = expansion(mult = c(0, 0.05))) +
+  labs(title = "Health Indicators: Colorado vs West Virginia (2023)",
+       subtitle = "Red values show the percentage point difference (WV - CO)",
+       x = NULL,
+       y = "Percentage of Adults",
+       fill = "State",
+       caption = "Source: Behavioral Risk Factor Surveillance System") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 13),
+        plot.subtitle = element_text(color = "gray40"),
+        axis.text.x = element_text(size = 9, face = "bold"),
+        legend.position = "top",
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor = element_blank())
+```
+
