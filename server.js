@@ -1537,6 +1537,7 @@ suppressPackageStartupMessages({
   if (requireNamespace("gt", quietly = TRUE)) library(gt)
   if (requireNamespace("plotly", quietly = TRUE)) library(plotly)
   if (requireNamespace("gganimate", quietly = TRUE)) library(gganimate)
+  if (requireNamespace("leaflet", quietly = TRUE)) library(leaflet)
 })
 
 # Load svglite library
@@ -1594,6 +1595,7 @@ suppressPackageStartupMessages({
   if (requireNamespace("gt", quietly = TRUE)) library(gt)
   if (requireNamespace("plotly", quietly = TRUE)) library(plotly)
   if (requireNamespace("gganimate", quietly = TRUE)) library(gganimate)
+  if (requireNamespace("leaflet", quietly = TRUE)) library(leaflet)
 })
 
 # Execute user code and check return value type first
@@ -2202,7 +2204,14 @@ suppressPackageStartupMessages({
   library(tidyr)
 })
 
-${baseFilename} <- read.csv("${filename}")
+# Load CSV - try with comment.char="#" which auto-skips comment lines
+${baseFilename} <- tryCatch({
+  read.csv("${filename}", comment.char="#")
+}, error = function(e) {
+  # If that fails, try skipping first line
+  cat("First attempt failed, trying with skip=1\\n")
+  read.csv("${filename}", skip=1, comment.char="")
+})
 
 # Dimensions
 cat("Dimensions:\\n")
