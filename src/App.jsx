@@ -1028,6 +1028,7 @@ Please respond with a JSON object in this format:
           console.log('Load-and-report result:', result);
           console.log('reportSections:', result.reportSections);
           console.log('filename:', result.filename);
+          console.log('missingDataPlot:', result.missingDataPlot);
 
           // Extract report title and description from response
           if (result.reportTitle) {
@@ -1078,7 +1079,8 @@ Please respond with a JSON object in this format:
             description: 'Comprehensive dataset analysis including structure, missing data, and tidy format assessment',
             output: {
               text: result.output,
-              error: result.error
+              error: result.error,
+              plots: result.missingDataPlot ? [result.missingDataPlot] : []
             }
           };
 
@@ -1107,7 +1109,7 @@ Please respond with a JSON object in this format:
           setCurrentOutput({
             text: result.output,
             error: result.error,
-            plots: []
+            plots: result.missingDataPlot ? [result.missingDataPlot] : []
           });
 
         } catch (error) {
@@ -1183,6 +1185,7 @@ Please respond with a JSON object in this format:
         const result = await response.json();
 
         console.log('Snowflake load result:', result);
+        console.log('Snowflake missingDataPlot:', result.missingDataPlot);
 
         // Store column metadata in dataset registry
         if (result.columnMetadata) {
@@ -1238,7 +1241,8 @@ Please respond with a JSON object in this format:
           description: 'Comprehensive dataset analysis including structure, missing data, and tidy format assessment',
           output: {
             text: result.output,
-            error: result.error
+            error: result.error,
+            plots: result.missingDataPlot ? [result.missingDataPlot] : []
           }
         };
 

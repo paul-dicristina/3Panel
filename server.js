@@ -9,7 +9,7 @@ import express from 'express';
 import cors from 'cors';
 import Anthropic from '@anthropic-ai/sdk';
 import { exec, spawn } from 'child_process';
-import { writeFile, unlink, mkdir } from 'fs/promises';
+import { writeFile, unlink, mkdir, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
@@ -672,6 +672,48 @@ cat("\\nData structure:\\n")
 str(data)
 cat("\\nFirst few rows:\\n")
 print(head(data))
+
+# === MISSING DATA VISUALIZATION ===
+# Only create visualization if there is missing data
+if(sum(is.na(data)) > 0) {
+  cat("\\n=== MISSING DATA VISUALIZATION ===\\n")
+
+  # Load naniar if available
+  if(requireNamespace("naniar", quietly = TRUE)) {
+    library(naniar)
+    library(ggplot2)
+
+    # Choose appropriate visualization based on dataset size and structure
+    n_rows <- nrow(data)
+    n_cols <- ncol(data)
+
+    if(n_rows <= 1000 && n_cols <= 20) {
+      # Small dataset: Show full missing data pattern
+      cat("Using vis_miss() - showing complete missing data pattern\\n")
+      print(vis_miss(data, warn_large_data = FALSE) +
+        theme_minimal() +
+        labs(title = "Missing Data Pattern"))
+    } else if(n_rows <= 10000 && n_cols <= 50) {
+      # Medium dataset: Show missing by variable with pattern
+      cat("Using gg_miss_var() - showing missing data by variable\\n")
+      print(gg_miss_var(data, show_pct = TRUE) +
+        theme_minimal() +
+        labs(title = "Missing Data by Variable"))
+    } else {
+      # Large dataset: Show counts only
+      cat("Using gg_miss_var() - showing missing data counts (large dataset)\\n")
+      print(gg_miss_var(data, show_pct = TRUE) +
+        theme_minimal() +
+        labs(title = "Missing Data by Variable",
+             subtitle = paste(n_rows, "rows x", n_cols, "columns")))
+    }
+  } else {
+    cat("⚠️  naniar package not installed - skipping missing data visualization\\n")
+    cat("Install with: install.packages('naniar')\\n")
+  }
+} else {
+  cat("\\n✓ No missing data detected\\n")
+}
 
 # === TIDY FORMAT ASSESSMENT ===
 cat("\\nTidy format check:\\n")
@@ -1566,6 +1608,7 @@ suppressPackageStartupMessages({
   if (requireNamespace("plotly", quietly = TRUE)) library(plotly)
   if (requireNamespace("gganimate", quietly = TRUE)) library(gganimate)
   if (requireNamespace("leaflet", quietly = TRUE)) library(leaflet)
+  if (requireNamespace("naniar", quietly = TRUE)) library(naniar)
 })
 
 # Load svglite library
@@ -1624,6 +1667,7 @@ suppressPackageStartupMessages({
   if (requireNamespace("plotly", quietly = TRUE)) library(plotly)
   if (requireNamespace("gganimate", quietly = TRUE)) library(gganimate)
   if (requireNamespace("leaflet", quietly = TRUE)) library(leaflet)
+  if (requireNamespace("naniar", quietly = TRUE)) library(naniar)
 })
 
 # Execute user code and check return value type first
@@ -2266,6 +2310,64 @@ cat("First few rows:\\n")
 print(head(${baseFilename}))
 cat("\\n")
 
+# === MISSING DATA VISUALIZATION ===
+# Only create visualization if there is missing data
+if(sum(is.na(${baseFilename})) > 0) {
+  cat("=== MISSING DATA VISUALIZATION ===\\n")
+
+  # Load naniar if available
+  if(requireNamespace("naniar", quietly = TRUE) && requireNamespace("svglite", quietly = TRUE)) {
+    library(naniar)
+    library(ggplot2)
+    library(svglite)
+
+    # Create SVG file for missing data plot (use persistent temp dir, not R's tempdir)
+    missing_plot_path <- "${TEMP_DIR.replace(/\\/g, '/')}/missing_data_${Date.now()}.svg"
+    svglite(missing_plot_path, width = 8, height = 6)
+
+    # Choose appropriate visualization based on dataset size and structure
+    n_rows <- nrow(${baseFilename})
+    n_cols <- ncol(${baseFilename})
+
+    tryCatch({
+      if(n_rows <= 1000 && n_cols <= 20) {
+        # Small dataset: Show full missing data pattern
+        cat("Using vis_miss() - showing complete missing data pattern\\n")
+        print(vis_miss(${baseFilename}, warn_large_data = FALSE) +
+          theme_minimal() +
+          labs(title = "Missing Data Pattern"))
+      } else if(n_rows <= 10000 && n_cols <= 50) {
+        # Medium dataset: Show missing by variable with pattern
+        cat("Using gg_miss_var() - showing missing data by variable\\n")
+        print(gg_miss_var(${baseFilename}, show_pct = TRUE) +
+          theme_minimal() +
+          labs(title = "Missing Data by Variable"))
+      } else {
+        # Large dataset: Show counts only
+        cat("Using gg_miss_var() - showing missing data counts (large dataset)\\n")
+        print(gg_miss_var(${baseFilename}, show_pct = TRUE) +
+          theme_minimal() +
+          labs(title = "Missing Data by Variable",
+               subtitle = paste(n_rows, "rows x", n_cols, "columns")))
+      }
+    }, error = function(e) {
+      cat("Error creating missing data visualization:", conditionMessage(e), "\\n")
+    })
+
+    # Close device
+    dev.off()
+
+    # Print path for backend to capture
+    cat("MISSING_DATA_PLOT:", missing_plot_path, "\\n")
+  } else {
+    cat("⚠️  naniar or svglite package not installed - skipping missing data visualization\\n")
+    cat("Install with: install.packages(c('naniar', 'svglite'))\\n")
+  }
+  cat("\\n")
+} else {
+  cat("✓ No missing data detected\\n\\n")
+}
+
 # Check for tidy format issues
 cat("Checking for tidy format issues...\\n")
 col_names <- names(${baseFilename})
@@ -2816,6 +2918,32 @@ Write your comprehensive report in JSON format based on this actual output.`;
     // Remove title from reportSections so it doesn't appear in the UI tabs
     delete reportSections.title;
 
+    // Check for missing data plot
+    let missingDataPlot = null;
+    const plotMatch = rOutput.stdout.match(/MISSING_DATA_PLOT:\s*(.+)/);
+    if (plotMatch) {
+      const plotPath = plotMatch[1].trim();
+      console.log('[CSV] Found missing data plot:', plotPath);
+
+      try {
+        if (existsSync(plotPath)) {
+          const svgContent = await readFile(plotPath, 'utf8');
+          missingDataPlot = {
+            type: 'svg',
+            data: svgContent
+          };
+          console.log('[CSV] Captured missing data plot (SVG)');
+
+          // Clean up temp file
+          await unlink(plotPath).catch(() => {});
+        } else {
+          console.log('[CSV] Missing data plot file not found at:', plotPath);
+        }
+      } catch (err) {
+        console.error('[CSV] Error reading missing data plot:', err);
+      }
+    }
+
     // Return complete response
     res.json({
       success: true,
@@ -2827,7 +2955,8 @@ Write your comprehensive report in JSON format based on this actual output.`;
       suggestions: suggestions,
       filename: filename,
       variableName: baseFilename,  // Add the sanitized R variable name
-      columnMetadata: columnMetadata  // Include schema for future chat requests
+      columnMetadata: columnMetadata,  // Include schema for future chat requests
+      missingDataPlot: missingDataPlot  // Include missing data visualization if present
     });
 
   } catch (error) {
@@ -2904,6 +3033,64 @@ cat("\\n")
 cat("First few rows:\\n")
 print(head(${varName}))
 cat("\\n")
+
+# === MISSING DATA VISUALIZATION ===
+# Only create visualization if there is missing data
+if(sum(is.na(${varName})) > 0) {
+  cat("=== MISSING DATA VISUALIZATION ===\\n")
+
+  # Load naniar if available
+  if(requireNamespace("naniar", quietly = TRUE) && requireNamespace("svglite", quietly = TRUE)) {
+    library(naniar)
+    library(ggplot2)
+    library(svglite)
+
+    # Create SVG file for missing data plot (use persistent temp dir, not R's tempdir)
+    missing_plot_path <- "${TEMP_DIR.replace(/\\/g, '/')}/missing_data_${Date.now()}.svg"
+    svglite(missing_plot_path, width = 8, height = 6)
+
+    # Choose appropriate visualization based on dataset size and structure
+    n_rows <- nrow(${varName})
+    n_cols <- ncol(${varName})
+
+    tryCatch({
+      if(n_rows <= 1000 && n_cols <= 20) {
+        # Small dataset: Show full missing data pattern
+        cat("Using vis_miss() - showing complete missing data pattern\\n")
+        print(vis_miss(${varName}, warn_large_data = FALSE) +
+          theme_minimal() +
+          labs(title = "Missing Data Pattern"))
+      } else if(n_rows <= 10000 && n_cols <= 50) {
+        # Medium dataset: Show missing by variable with pattern
+        cat("Using gg_miss_var() - showing missing data by variable\\n")
+        print(gg_miss_var(${varName}, show_pct = TRUE) +
+          theme_minimal() +
+          labs(title = "Missing Data by Variable"))
+      } else {
+        # Large dataset: Show counts only
+        cat("Using gg_miss_var() - showing missing data counts (large dataset)\\n")
+        print(gg_miss_var(${varName}, show_pct = TRUE) +
+          theme_minimal() +
+          labs(title = "Missing Data by Variable",
+               subtitle = paste(n_rows, "rows x", n_cols, "columns")))
+      }
+    }, error = function(e) {
+      cat("Error creating missing data visualization:", conditionMessage(e), "\\n")
+    })
+
+    # Close device
+    dev.off()
+
+    # Print path for backend to capture
+    cat("MISSING_DATA_PLOT:", missing_plot_path, "\\n")
+  } else {
+    cat("⚠️  naniar or svglite package not installed - skipping missing data visualization\\n")
+    cat("Install with: install.packages(c('naniar', 'svglite'))\\n")
+  }
+  cat("\\n")
+} else {
+  cat("✓ No missing data detected\\n\\n")
+}
 
 # Check for tidy format issues
 cat("Checking for tidy format issues...\\n")
@@ -3462,6 +3649,32 @@ Write your comprehensive report in JSON format based on this actual output.`;
     // Remove title from reportSections so it doesn't appear in the UI tabs
     delete reportSections.title;
 
+    // Check for missing data plot
+    let missingDataPlot = null;
+    const plotMatch = rOutput.stdout.match(/MISSING_DATA_PLOT:\s*(.+)/);
+    if (plotMatch) {
+      const plotPath = plotMatch[1].trim();
+      console.log('[SNOWFLAKE] Found missing data plot:', plotPath);
+
+      try {
+        if (existsSync(plotPath)) {
+          const svgContent = await readFile(plotPath, 'utf8');
+          missingDataPlot = {
+            type: 'svg',
+            data: svgContent
+          };
+          console.log('[SNOWFLAKE] Captured missing data plot (SVG)');
+
+          // Clean up temp file
+          await unlink(plotPath).catch(() => {});
+        } else {
+          console.log('[SNOWFLAKE] Missing data plot file not found at:', plotPath);
+        }
+      } catch (err) {
+        console.error('[SNOWFLAKE] Error reading missing data plot:', err);
+      }
+    }
+
     // Return complete response
     res.json({
       success: true,
@@ -3473,7 +3686,8 @@ Write your comprehensive report in JSON format based on this actual output.`;
       suggestions: suggestions,
       tableName: `${database}.${schema}.${tableName}`,
       variableName: varName,
-      columnMetadata: columnMetadata  // Include schema for future chat requests
+      columnMetadata: columnMetadata,  // Include schema for future chat requests
+      missingDataPlot: missingDataPlot  // Include missing data visualization if present
     });
 
   } catch (error) {
