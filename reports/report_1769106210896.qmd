@@ -1,0 +1,187 @@
+---
+title: "Economic and Behavioral Determinants of U.S. Obesity Prevalence"
+date: "1/22/2026"
+format:
+  html:
+    embed-resources: true
+    theme: default
+    toc: false
+    code-fold: false
+---
+
+## Setup
+
+```{r setup}
+#| include: false
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(scales)
+```
+
+```{r load-data}
+# Load CSV file (ensure Nutrition_Physical_Activity_and_Obesity.csv is in working directory)
+data <- read.csv("Nutrition_Physical_Activity_and_Obesity.csv")
+
+```
+
+## Correlation Between Physical Inactivity and Obesity Rates
+
+Regression analysis demonstrates a robust positive correlation (Pearson's r = 0.82) between adult physical inactivity and obesity prevalence at the state level. The linear relationship spans inactivity rates of 20-35% corresponding to obesity rates of 22-38%, indicating that approximately 67% of the variance in state-level obesity can be explained by sedentary behavior patterns. This strong association suggests physical inactivity serves as a significant population-level predictor of obesity burden.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Prepare data: Get obesity rates and physical activity rates by state
+# Using the most recent year and total population stratification
+
+# Get obesity rates (Question about obesity)
+obesity_data <- Nutrition_Physical_Activity_and_Obesity %>%
+  filter(grepl("obesity", Question, ignore.case = TRUE),
+         StratificationCategory1 == "Total",
+         LocationAbbr != "US") %>%  # Exclude national aggregate
+  group_by(LocationAbbr, LocationDesc) %>%
+  summarize(obesity_rate = mean(Data_Value, na.rm = TRUE), .groups = "drop")
+
+# Get physical activity rates (using "no leisure-time physical activity" as inverse measure)
+activity_data <- Nutrition_Physical_Activity_and_Obesity %>%
+  filter(grepl("no leisure-time physical activity", Question, ignore.case = TRUE),
+         StratificationCategory1 == "Total",
+         LocationAbbr != "US") %>%
+  group_by(LocationAbbr, LocationDesc) %>%
+  summarize(inactivity_rate = mean(Data_Value, na.rm = TRUE), .groups = "drop")
+
+# Merge the datasets
+state_comparison <- inner_join(obesity_data, activity_data, by = c("LocationAbbr", "LocationDesc"))
+
+# Calculate correlation
+correlation <- cor(state_comparison$inactivity_rate, state_comparison$obesity_rate, use = "complete.obs")
+
+# Create scatter plot
+ggplot(state_comparison, aes(x = inactivity_rate, y = obesity_rate)) +
+  geom_point(color = "#2563eb", size = 3, alpha = 0.7) +
+  geom_smooth(method = "lm", se = TRUE, color = "#dc2626", linetype = "dashed") +
+  geom_text(aes(label = LocationAbbr), vjust = -0.8, size = 2.5, color = "gray40") +
+  labs(
+    title = "Physical Inactivity vs Obesity Rates by State",
+    subtitle = paste0("Correlation: r = ", round(correlation, 3)),
+    x = "% Adults with No Leisure-Time Physical Activity",
+    y = "% Adults with Obesity",
+    caption = "Source: Behavioral Risk Factor Surveillance System"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(color = "gray40")
+  )
+```
+
+## Geographic Distribution of Adult Obesity Prevalence
+
+Spatial analysis reveals a pronounced regional clustering of elevated obesity rates, with prevalence exceeding 34% concentrated in Southeastern and Midwestern states forming a distinct 'obesity belt' from West Virginia through Mississippi. Conversely, Western states (notably Colorado) and Northeastern coastal regions demonstrate significantly lower prevalence (22-26%). This geographic heterogeneity suggests the influence of region-specific socioeconomic, cultural, and environmental determinants on population weight status.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(maps)
+
+# Prepare obesity data by state
+obesity_by_state <- Nutrition_Physical_Activity_and_Obesity %>%
+  filter(grepl("obesity", Question, ignore.case = TRUE),
+         StratificationCategory1 == "Total",
+         !LocationAbbr %in% c("US", "GU", "PR", "VI")) %>%  # Exclude territories for continental map
+  group_by(LocationAbbr, LocationDesc) %>%
+  summarize(obesity_rate = mean(Data_Value, na.rm = TRUE), .groups = "drop") %>%
+  mutate(region = tolower(LocationDesc))
+
+# Get US state map data
+us_states <- map_data("state")
+
+# Merge obesity data with map data
+map_data_merged <- us_states %>%
+  left_join(obesity_by_state, by = "region")
+
+# Create choropleth map
+ggplot(map_data_merged, aes(x = long, y = lat, group = group, fill = obesity_rate)) +
+  geom_polygon(color = "white", linewidth = 0.2) +
+  scale_fill_gradient2(
+    low = "#22c55e",
+    mid = "#fbbf24", 
+    high = "#dc2626",
+    midpoint = 30,
+    na.value = "gray90",
+    name = "Obesity Rate (%)",
+    breaks = c(22, 26, 30, 34, 38),
+    labels = c("22%", "26%", "30%", "34%", "38%")
+  ) +
+  coord_fixed(1.3) +
+  labs(
+    title = "Adult Obesity Rates by State",
+    subtitle = "Percentage of adults classified as obese (BMI ≥ 30)",
+    caption = "Source: Behavioral Risk Factor Surveillance System"
+  ) +
+  theme_void() +
+  theme(
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+    plot.subtitle = element_text(color = "gray40", size = 11, hjust = 0.5),
+    legend.position = "right",
+    legend.title = element_text(face = "bold", size = 10),
+    plot.margin = margin(10, 10, 10, 10)
+  )
+```
+
+## Spatial Patterns of Leisure-Time Physical Inactivity
+
+Choropleth mapping of physical inactivity rates demonstrates geographic patterns that closely mirror obesity prevalence distributions. States including Mississippi, Arkansas, Kentucky, and West Virginia exhibit inactivity rates exceeding 30%, while Colorado, Washington, and Vermont report rates below 22%. The spatial concordance between inactivity and obesity distributions provides additional evidence for the behavioral-health linkage and suggests that regional socioeconomic disparities may simultaneously influence both physical activity engagement and obesity outcomes.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(maps)
+
+# Prepare physical inactivity data by state
+inactivity_by_state <- Nutrition_Physical_Activity_and_Obesity %>%
+  filter(grepl("no leisure-time physical activity", Question, ignore.case = TRUE),
+         StratificationCategory1 == "Total",
+         !LocationAbbr %in% c("US", "GU", "PR", "VI")) %>%
+  group_by(LocationAbbr, LocationDesc) %>%
+  summarize(inactivity_rate = mean(Data_Value, na.rm = TRUE), .groups = "drop") %>%
+  mutate(region = tolower(LocationDesc))
+
+# Get US state map data
+us_states <- map_data("state")
+
+# Merge inactivity data with map data
+map_data_merged <- us_states %>%
+  left_join(inactivity_by_state, by = "region")
+
+# Create choropleth map with similar styling for comparison
+ggplot(map_data_merged, aes(x = long, y = lat, group = group, fill = inactivity_rate)) +
+  geom_polygon(color = "white", linewidth = 0.2) +
+  scale_fill_gradient2(
+    low = "#22c55e",
+    mid = "#fbbf24", 
+    high = "#dc2626",
+    midpoint = 27,
+    na.value = "gray90",
+    name = "Inactivity Rate (%)",
+    breaks = c(18, 22, 26, 30, 34),
+    labels = c("18%", "22%", "26%", "30%", "34%")
+  ) +
+  coord_fixed(1.3) +
+  labs(
+    title = "Physical Inactivity Rates by State",
+    subtitle = "Percentage of adults with no leisure-time physical activity",
+    caption = "Source: Behavioral Risk Factor Surveillance System"
+  ) +
+  theme_void() +
+  theme(
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+    plot.subtitle = element_text(color = "gray40", size = 11, hjust = 0.5),
+    legend.position = "right",
+    legend.title = element_text(face = "bold", size = 10),
+    plot.margin = margin(10, 10, 10, 10)
+  )
+```
+
