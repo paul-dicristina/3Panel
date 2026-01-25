@@ -1643,8 +1643,8 @@ Please respond with a JSON object in this format:
         setSelectedCardId(firstNewCard.id);
         setCurrentCode(firstNewCard.code);
 
-        // Execute the R code
-        executeSelectedCode(firstNewCard.code, firstNewCard.id);
+        // Execute the R code (await so loading spinner stays visible)
+        await executeSelectedCode(firstNewCard.code, firstNewCard.id);
       }
     } catch (error) {
       console.error('Error sending message:', error);
