@@ -49,6 +49,10 @@ function App() {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
+  // Enhanced loading state - tracks current operation
+  const [loadingOperation, setLoadingOperation] = useState(null);
+  // loadingOperation structure: { operation: string, substep: string|null, details: object|null }
+
   // Code cards state
   const [codeCards, setCodeCards] = useState([]);
   const [selectedCardId, setSelectedCardId] = useState(null);
@@ -996,6 +1000,13 @@ Please respond with a JSON object in this format:
         const loadMessage = `Loaded ${filename} (dataset variable name: ${sanitizedVarName})`;
         setIsLoading(true);
 
+        // Set enhanced loading operation
+        setLoadingOperation({
+          operation: 'Loading dataset',
+          substep: 'Uploading file',
+          details: null
+        });
+
         // Add user message to chat
         const newUserMessage = {
           id: Date.now(),
@@ -1005,6 +1016,12 @@ Please respond with a JSON object in this format:
         setMessages(prev => [...prev, newUserMessage]);
 
         try {
+          // Update substep for analysis phase
+          setLoadingOperation(prev => prev ? {
+            ...prev,
+            substep: 'Analyzing structure'
+          } : null);
+
           // Call the new two-phase load-and-report endpoint
           const response = await fetch('/api/load-and-report-data', {
             method: 'POST',
@@ -1022,13 +1039,18 @@ Please respond with a JSON object in this format:
             throw new Error('Failed to load and analyze data');
           }
 
+          // Update substep for generating report sections
+          setLoadingOperation(prev => prev ? {
+            ...prev,
+            substep: 'Generating analysis'
+          } : null);
+
           const result = await response.json();
 
           // Debug: Log the result to see what we got back
           console.log('Load-and-report result:', result);
           console.log('reportSections:', result.reportSections);
           console.log('filename:', result.filename);
-          console.log('missingDataPlot:', result.missingDataPlot);
 
           // Extract report title and description from response
           if (result.reportTitle) {
@@ -1080,7 +1102,7 @@ Please respond with a JSON object in this format:
             output: {
               text: result.output,
               error: result.error,
-              plots: result.missingDataPlot ? [result.missingDataPlot] : []
+              plots: []
             }
           };
 
@@ -1109,7 +1131,7 @@ Please respond with a JSON object in this format:
           setCurrentOutput({
             text: result.output,
             error: result.error,
-            plots: result.missingDataPlot ? [result.missingDataPlot] : []
+            plots: []
           });
 
         } catch (error) {
@@ -1122,6 +1144,8 @@ Please respond with a JSON object in this format:
           setMessages(prev => [...prev, errorMessage]);
         } finally {
           setIsLoading(false);
+          // Clear loading operation
+          setLoadingOperation(null);
         }
       } catch (error) {
         console.error('Error uploading file:', error);
@@ -1148,10 +1172,21 @@ Please respond with a JSON object in this format:
   const handleLoadSnowflakeTables = async (selectedItems) => {
     setIsLoading(true);
 
-    for (const item of selectedItems) {
+    for (let i = 0; i < selectedItems.length; i++) {
+      const item = selectedItems[i];
       const varName = item.name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
       const fullTableName = `${item.database}.${item.schema}.${item.name}`;
       const loadMessage = `Loaded ${fullTableName} (dataset variable name: ${varName})`;
+
+      // Set enhanced loading operation with multi-table progress
+      setLoadingOperation({
+        operation: 'Loading Snowflake tables',
+        substep: null,
+        details: {
+          current: i + 1,
+          total: selectedItems.length
+        }
+      });
 
       // Add user message to chat
       const newUserMessage = {
@@ -1162,6 +1197,12 @@ Please respond with a JSON object in this format:
       setMessages(prev => [...prev, newUserMessage]);
 
       try {
+        // Update substep for analysis phase
+        setLoadingOperation(prev => prev ? {
+          ...prev,
+          substep: 'Analyzing structure'
+        } : null);
+
         // Call the new load-and-report-snowflake endpoint
         const response = await fetch('/api/load-and-report-snowflake', {
           method: 'POST',
@@ -1182,10 +1223,15 @@ Please respond with a JSON object in this format:
           throw new Error('Failed to load and analyze Snowflake table');
         }
 
+        // Update substep for generating report sections
+        setLoadingOperation(prev => prev ? {
+          ...prev,
+          substep: 'Generating analysis'
+        } : null);
+
         const result = await response.json();
 
         console.log('Snowflake load result:', result);
-        console.log('Snowflake missingDataPlot:', result.missingDataPlot);
 
         // Store column metadata in dataset registry
         if (result.columnMetadata) {
@@ -1242,7 +1288,7 @@ Please respond with a JSON object in this format:
           output: {
             text: result.output,
             error: result.error,
-            plots: result.missingDataPlot ? [result.missingDataPlot] : []
+            plots: []
           }
         };
 
@@ -1268,7 +1314,7 @@ Please respond with a JSON object in this format:
         setCodeCards(prev => [...prev, diagnosticCard]);
 
         // Wait a bit before processing next item
-        if (selectedItems.indexOf(item) < selectedItems.length - 1) {
+        if (i < selectedItems.length - 1) {
           await new Promise(resolve => setTimeout(resolve, 500));
         }
 
@@ -1284,6 +1330,8 @@ Please respond with a JSON object in this format:
     }
 
     setIsLoading(false);
+    // Clear loading operation
+    setLoadingOperation(null);
   };
 
   // Handle new conversation - reset all panels
@@ -1515,6 +1563,7 @@ Please respond with a JSON object in this format:
     setShowOptionsMenu(!showOptionsMenu);
   };
 
+
   // Handle sending a message to Claude
   const handleSendMessage = async (messageOverride = null) => {
     // SAFETY: Ensure message is always a string, never an object or DOM element
@@ -1534,6 +1583,13 @@ Please respond with a JSON object in this format:
     const userMessage = messageToSend;
     setInputValue('');
     setIsLoading(true);
+
+    // Set enhanced loading operation
+    setLoadingOperation({
+      operation: 'Calling Claude API',
+      substep: null,
+      details: null
+    });
 
     // Add user message to chat
     const newUserMessage = {
@@ -1585,6 +1641,12 @@ Please respond with a JSON object in this format:
         cleanColumnMetadata,  // Pass dataset schema so Claude knows column names
         datasetRegistry.activeDataset  // Pass active dataset name
       );
+
+      // Update substep for response parsing
+      setLoadingOperation(prev => prev ? {
+        ...prev,
+        substep: 'Parsing response'
+      } : null);
 
       // Create code cards for any R code blocks
       const newCards = response.rCodeBlocks.length > 0
@@ -1657,6 +1719,8 @@ Please respond with a JSON object in this format:
     } finally {
       setIsLoading(false);
       setIsSubmitAnimating(false);
+      // Clear loading operation if not already cleared by executeSelectedCode
+      setLoadingOperation(null);
     }
   };
 
@@ -2155,6 +2219,13 @@ Respond with ONLY a JSON code block in this format:
 
   // Execute R code and update output
   const executeSelectedCode = async (code, cardId) => {
+    // Set loading operation state
+    setLoadingOperation({
+      operation: 'Executing R code',
+      substep: null,
+      details: null
+    });
+
     try {
       // Determine if this code might modify the dataset structure
       const mightModifyDataset = code.includes('pivot_longer') ||
@@ -2178,6 +2249,11 @@ Respond with ONLY a JSON code block in this format:
 
       // Update dataset registry if metadata was refreshed
       if (result.updatedMetadata) {
+        // Update substep to show metadata refresh
+        setLoadingOperation(prev => prev ? {
+          ...prev,
+          substep: 'Refreshing metadata'
+        } : null);
         const { datasetName, columnMetadata, hash, shouldBecomeActive } = result.updatedMetadata;
         console.log(`[EXECUTE] Updating registry for dataset '${datasetName}' with refreshed metadata`);
 
@@ -2222,6 +2298,9 @@ Respond with ONLY a JSON code block in this format:
         tables: [],
         error: error.message
       });
+    } finally {
+      // Clear loading operation
+      setLoadingOperation(null);
     }
   };
 
@@ -2844,10 +2923,27 @@ Respond with ONLY a JSON code block in this format:
 
             {messages.map(renderMessage)}
 
-            {isLoading && (
+            {(isLoading || loadingOperation) && (
               <div className="flex items-center gap-2 text-gray-500 mb-4">
                 <img src="/animated-diamond-loop.svg" alt="" className="w-[34px] h-[34px]" />
-                <span>Positronic is thinking...</span>
+                <div className="flex flex-col">
+                  <span className="font-medium">
+                    {loadingOperation ? (
+                      <>
+                        {loadingOperation.operation}
+                        {loadingOperation.details?.current &&
+                          ` (${loadingOperation.details.current} of ${loadingOperation.details.total})`
+                        }
+                        ...
+                      </>
+                    ) : (
+                      'Positronic is thinking...'
+                    )}
+                  </span>
+                  {loadingOperation?.substep && (
+                    <span className="text-sm text-gray-400">{loadingOperation.substep}</span>
+                  )}
+                </div>
               </div>
             )}
           </div>
