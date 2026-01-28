@@ -2450,26 +2450,33 @@ Respond with ONLY a JSON code block in this format:
               <p className="font-semibold text-gray-700">Suggestions:</p>
               <p className="text-xs text-gray-500 italic">SHIFT click to submit directly</p>
               <img
-                src={expandedSuggestions.has(message.id) ? '/carat_open.png' : '/carat_closed.png'}
+                src="/carat_open.png"
                 alt={expandedSuggestions.has(message.id) ? 'Collapse' : 'Expand'}
-                className="w-4 h-4 transition-opacity duration-200"
+                className="w-4 h-4 transition-transform duration-200"
+                style={{
+                  transform: expandedSuggestions.has(message.id) ? 'rotate(0deg)' : 'rotate(-90deg)'
+                }}
               />
             </div>
-            {expandedSuggestions.has(message.id) && (
-              <div className="grid grid-cols-2 gap-3">
-                {suggestions.map((suggestion, index) => {
-                  const iconName = getSuggestionIcon(suggestion);
-                  return (
-                    <InteractiveSuggestion
-                      key={index}
-                      suggestion={suggestion}
-                      iconName={iconName}
-                      onSubmit={handleSuggestionClick}
-                    />
-                  );
-                })}
-              </div>
-            )}
+            <div
+              className="grid grid-cols-2 gap-3 transition-all duration-300 ease-in-out overflow-hidden"
+              style={{
+                maxHeight: expandedSuggestions.has(message.id) ? '2000px' : '0px',
+                opacity: expandedSuggestions.has(message.id) ? 1 : 0
+              }}
+            >
+              {suggestions.map((suggestion, index) => {
+                const iconName = getSuggestionIcon(suggestion);
+                return (
+                  <InteractiveSuggestion
+                    key={index}
+                    suggestion={suggestion}
+                    iconName={iconName}
+                    onSubmit={handleSuggestionClick}
+                  />
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
