@@ -796,10 +796,24 @@ Please respond with a JSON object in this format:
       console.log('Step 5: Handling export result...');
 
       if (format === 'quarto' || format === 'jupyter') {
-        // Trigger download
-        const downloadUrl = `http://localhost:3001${result.downloadUrl}`;
+        // Trigger download using temporary <a> element to avoid navigating away from 3Panel
+        // IMPORTANT: Use relative URL (not full URL) for download attribute to work properly
+        const downloadUrl = result.downloadUrl; // Already relative: /download/report/filename
         console.log('Triggering download:', downloadUrl);
-        window.location.href = downloadUrl;
+
+        // Create temporary link element
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = result.filename || result.qmdFilename; // Set filename for download
+        link.style.display = 'none'; // Hide the link
+        document.body.appendChild(link);
+        link.click();
+
+        // Clean up after a short delay to ensure click is processed
+        setTimeout(() => {
+          document.body.removeChild(link);
+        }, 100);
+
         console.log('=== EXPORT SUCCESS ===');
       } else if (format === 'pdf') {
         // Open HTML and let user print to PDF
@@ -1074,10 +1088,11 @@ Please respond with a JSON object in this format:
               columns: result.columnMetadata.map(c => c.name)
             });
 
-            // Update dataset registry
-            setDatasetRegistry({
+            // Update dataset registry - MERGE with existing datasets, don't replace
+            setDatasetRegistry(prev => ({
               activeDataset: datasetName,
               datasets: {
+                ...prev.datasets,  // Preserve existing datasets
                 [datasetName]: {
                   columnMetadata: result.columnMetadata,
                   lastModified: Date.now(),
@@ -1086,7 +1101,7 @@ Please respond with a JSON object in this format:
                   filename: filename
                 }
               }
-            });
+            }));
 
             // Also update legacy columnMetadata for backward compatibility
             setColumnMetadata(result.columnMetadata);
@@ -1241,10 +1256,11 @@ Please respond with a JSON object in this format:
             columns: result.columnMetadata.map(c => c.name)
           });
 
-          // Update dataset registry
-          setDatasetRegistry({
+          // Update dataset registry - MERGE with existing datasets, don't replace
+          setDatasetRegistry(prev => ({
             activeDataset: datasetName,
             datasets: {
+              ...prev.datasets,  // Preserve existing datasets
               [datasetName]: {
                 columnMetadata: result.columnMetadata,
                 lastModified: Date.now(),
@@ -1253,7 +1269,7 @@ Please respond with a JSON object in this format:
                 fullTableName: fullTableName
               }
             }
-          });
+          }));
 
           // Also update legacy columnMetadata for backward compatibility
           setColumnMetadata(result.columnMetadata);

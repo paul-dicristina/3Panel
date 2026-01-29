@@ -1312,6 +1312,238 @@ This wraps the handler in an arrow function, preventing the event from being pas
 
 ---
 
+### Jupyter/Quarto Export Bug Fixes (2026-01-29)
+
+**Status:** Fully Implemented
+
+Fixed critical bugs in Jupyter notebook and Quarto document exports that caused exported code to fail when executed.
+
+#### Bug #1: Dataset Name Mismatch (CRITICAL)
+
+**Problem:**
+- Backend loaded dataset as `Nutrition_Physical_Activity_and_Obesity <- read.csv(...)`
+- Backend sent `variableName` field but frontend expected `datasetName`
+- Frontend defaulted to `datasetName = 'data'` when field was missing
+- Export generated: `data <- read.csv(...)` (wrong variable name)
+- But code cards referenced: `Nutrition_Physical_Activity_and_Obesity` (original name)
+- Result: "object not found" error when running exported notebook
+
+**Root Cause:**
+- [server.js:2874](server.js#L2874) sent `variableName: baseFilename`
+- [App.jsx:1071](src/App.jsx#L1071) expected `result.datasetName || 'data'`
+- Mismatch caused wrong variable name to be stored in dataset registry
+
+**Fix:**
+Changed backend responses to use `datasetName` consistently:
+```javascript
+// CSV loading (server.js:2874)
+datasetName: baseFilename  // Changed from 'variableName'
+
+// Snowflake loading (server.js:3528)
+datasetName: varName  // Changed from 'variableName'
+```
+
+**Impact:** Exported notebooks now generate correct variable names matching the actual code.
+
+---
+
+#### Bug #2: Missing Libraries in Setup
+
+**Problem:**
+- Setup cell only included hardcoded libraries: `dplyr`, `ggplot2`, `tidyr`, `scales`
+- Code cells used additional libraries like `maps`, but they weren't in setup
+- Result: "library not found" error when running exported notebook
+
+**Fix:**
+Added `collectRequiredLibraries()` function ([server.js:3618-3632](server.js#L3618-L3632)):
+```javascript
+function collectRequiredLibraries(codeChain) {
+  const libraries = new Set(['dplyr', 'ggplot2', 'tidyr', 'scales']);
+
+  // Scan all code for library() calls
+  codeChain.forEach(card => {
+    const libraryRegex = /library\(([^)]+)\)/g;
+    let match;
+    while ((match = libraryRegex.exec(card.code)) !== null) {
+      const libName = match[1].trim().replace(/['"]/g, '');
+      libraries.add(libName);
+    }
+  });
+
+  return Array.from(libraries).sort();
+}
+```
+
+Updated exports to use detected libraries:
+- Jupyter export ([server.js:4467](server.js#L4467))
+- Quarto export ([server.js:3901](server.js#L3901))
+- Reproducible script export ([server.js:3665](server.js#L3665))
+
+**Impact:** All required libraries automatically included in setup cell.
+
+---
+
+#### Bug #3: Redundant Library Calls in Code
+
+**Problem:**
+- Analysis code cells reloaded `library(ggplot2)`, `library(dplyr)`, etc.
+- These were already loaded in setup cell
+- Result: Cluttered code, poor user experience
+
+**Fix:**
+Added `stripRedundantLibraryCalls()` function ([server.js:3640-3656](server.js#L3640-L3656)):
+```javascript
+function stripRedundantLibraryCalls(code, setupLibraries) {
+  const lines = code.split('\n');
+  const cleanedLines = lines.filter(line => {
+    const match = line.trim().match(/^library\(([^)]+)\)/);
+    if (!match) return true; // Not a library call, keep it
+
+    const libName = match[1].trim().replace(/['"]/g, '');
+    return !setupLibraries.includes(libName); // Remove if already in setup
+  });
+
+  return cleanedLines.join('\n');
+}
+```
+
+Applied to all exports:
+- Jupyter code cells ([server.js:4500](server.js#L4500))
+- Quarto code chunks ([server.js:3980](server.js#L3980))
+- Reproducible scripts ([server.js:3694](server.js#L3694))
+
+**Impact:** Clean, professional exported code without redundant library() calls.
+
+---
+
+#### Bug #4: Export Validation Warnings
+
+**Problem:**
+- No validation before export to catch potential issues
+- Users discovered problems only after export
+
+**Fix:**
+Added `validateExportData()` function ([server.js:3661-3689](server.js#L3661-L3689)):
+```javascript
+function validateExportData(codeCards, datasetRegistry) {
+  const errors = [];
+  const warnings = [];
+
+  // Collect all dataset references in code
+  const datasetReferences = new Set();
+  codeCards.forEach(card => {
+    const pipeRegex = /\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(%>%|\[|\$)/g;
+    let match;
+    while ((match = pipeRegex.exec(card.code)) !== null) {
+      datasetReferences.add(match[1]);
+    }
+  });
+
+  // Check if all referenced datasets are in registry
+  const registeredDatasets = new Set(Object.keys(datasetRegistry.datasets || {}));
+  datasetReferences.forEach(ref => {
+    if (!registeredDatasets.has(ref)) {
+      warnings.push(`Code references dataset '${ref}' but it's not in the dataset registry`);
+    }
+  });
+
+  return { errors, warnings };
+}
+```
+
+Added validation to export endpoints:
+- Jupyter export ([server.js:4441](server.js#L4441))
+- Quarto export ([server.js:3395](server.js#L3395))
+
+**Impact:** Warnings logged to console help catch issues during development.
+
+---
+
+#### Bug #5: Tab Navigation on Export (2026-01-29)
+
+**Problem:**
+- When exporting Jupyter or Quarto files, the 3Panel tab navigated away to show raw notebook JSON
+- Using `window.location.href = downloadUrl` navigated the current tab instead of triggering a download
+- Backend served files with `Content-Type: application/json` which displays instead of downloads
+
+**Root Cause:**
+- **Frontend** ([App.jsx:802](src/App.jsx#L802)): `window.location.href` navigates current tab
+- **Backend** ([server.js:4610](server.js#L4610)): `express.static()` doesn't set `Content-Disposition: attachment` headers
+
+**Fix - Frontend** ([App.jsx:798-809](src/App.jsx#L798-L809)):
+```javascript
+// Create temporary link element to trigger download without navigation
+const link = document.createElement('a');
+link.href = downloadUrl;
+link.download = result.filename || result.qmdFilename;
+document.body.appendChild(link);
+link.click();
+document.body.removeChild(link);
+```
+
+**Fix - Backend** ([server.js:4612-4645](server.js#L4612-L4645)):
+```javascript
+// Dedicated download endpoint with proper Content-Disposition headers
+// IMPORTANT: Must be under /api/ to be proxied by Vite dev server
+app.get('/api/download/report/:filename', (req, res) => {
+  // Security check for directory traversal
+  if (filename.includes('..') || filename.includes('/')) {
+    return res.status(400).json({ error: 'Invalid filename' });
+  }
+  // Set Content-Disposition: attachment to force download
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  // Set correct Content-Type based on file extension
+  if (filename.endsWith('.ipynb')) {
+    res.setHeader('Content-Type', 'application/x-ipynb+json');
+  }
+  res.sendFile(filepath);
+});
+```
+
+**Why `/api/` prefix?**
+- Vite dev server only proxies requests under `/api/` to Express backend ([vite.config.js:8-13](vite.config.js#L8-L13))
+- Requests to other paths (like `/download/`) are handled by Vite directly
+- This is required for development mode to work correctly
+
+**Updated Export Responses:**
+- Quarto: `downloadUrl: /api/download/report/${qmdFilename}` ([server.js:4422](server.js#L4422))
+- Jupyter: `downloadUrl: /api/download/report/${filename}` ([server.js:4664](server.js#L4664))
+
+**Impact:**
+- ✅ 3Panel tab stays on the interface (no navigation)
+- ✅ Files download automatically instead of displaying
+- ✅ Proper download prompts with correct filenames
+- ✅ Security: Prevents directory traversal attacks
+
+---
+
+#### Summary of Export Fixes
+
+**Files Modified:**
+- [server.js](server.js) - Lines 2874, 3528, 3618-3689, 3665, 3901, 3980, 4422, 4441, 4467, 4500, 4612-4645, 4664
+- [src/App.jsx](src/App.jsx) - Lines 798-815
+
+**Changes:**
+1. ✅ Fixed dataset name consistency (`variableName` → `datasetName`)
+2. ✅ Added automatic library detection from code
+3. ✅ Strip redundant library calls from exported code
+4. ✅ Added validation warnings for potential issues
+5. ✅ Fixed tab navigation with proper download mechanism
+
+**Testing:**
+- Exported notebooks now execute without modification
+- All libraries automatically included
+- Clean, professional code structure
+- Dataset names match code references
+
+**User-Facing Impact:**
+- Jupyter notebooks work immediately after export
+- Quarto documents render without errors
+- No need to manually add missing libraries
+- Professional code quality
+
+---
+
 ## Performance Optimization & Enhanced Status Messaging
 
 **Status:** Implemented (2026-01-28) - Later Reverted for Review

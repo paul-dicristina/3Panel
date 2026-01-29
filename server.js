@@ -2871,7 +2871,7 @@ Write your comprehensive report in JSON format based on this actual output.`;
       error: filteredError,
       suggestions: suggestions,
       filename: filename,
-      variableName: baseFilename,  // Add the sanitized R variable name
+      datasetName: baseFilename,  // Add the sanitized R variable name (fixed from variableName)
       columnMetadata: columnMetadata  // Include schema for future chat requests
     });
 
@@ -3525,7 +3525,7 @@ Write your comprehensive report in JSON format based on this actual output.`;
       error: filteredError,
       suggestions: suggestions,
       tableName: `${database}.${schema}.${tableName}`,
-      variableName: varName,
+      datasetName: varName,  // Fixed from variableName for consistency
       columnMetadata: columnMetadata  // Include schema for future chat requests
     });
 
@@ -3611,6 +3611,85 @@ function generateDatasetLoadCode(datasets) {
 }
 
 /**
+ * Helper: Collect all required libraries from code chain
+ * @param {Array} codeChain - Array of code card objects
+ * @returns {Array<string>} Sorted array of library names
+ */
+function collectRequiredLibraries(codeChain) {
+  const libraries = new Set(['dplyr', 'ggplot2', 'tidyr', 'scales']); // Base libraries always included
+
+  // Scan all code for library() calls
+  codeChain.forEach(card => {
+    const libraryRegex = /library\(([^)]+)\)/g;
+    let match;
+    while ((match = libraryRegex.exec(card.code)) !== null) {
+      const libName = match[1].trim().replace(/['"]/g, '');
+      libraries.add(libName);
+    }
+  });
+
+  return Array.from(libraries).sort();
+}
+
+/**
+ * Helper: Strip redundant library() calls that are already in setup
+ * @param {string} code - R code that may contain library() calls
+ * @param {Array<string>} setupLibraries - Libraries already loaded in setup
+ * @returns {string} Code with redundant library() calls removed
+ */
+function stripRedundantLibraryCalls(code, setupLibraries) {
+  const lines = code.split('\n');
+  const cleanedLines = lines.filter(line => {
+    // Check if line is a library() call
+    const match = line.trim().match(/^library\(([^)]+)\)/);
+    if (!match) return true; // Not a library call, keep it
+
+    const libName = match[1].trim().replace(/['"]/g, '');
+    // Remove if this library is already in setup
+    return !setupLibraries.includes(libName);
+  });
+
+  return cleanedLines.join('\n');
+}
+
+/**
+ * Helper: Validate export data for potential issues
+ * @param {Array} codeCards - All code cards
+ * @param {Object} datasetRegistry - Dataset registry
+ * @returns {Object} Object with errors and warnings arrays
+ */
+function validateExportData(codeCards, datasetRegistry) {
+  const errors = [];
+  const warnings = [];
+
+  // Collect all dataset references in code
+  const datasetReferences = new Set();
+  codeCards.forEach(card => {
+    // Match dataset names (word followed by %>%, [, or $)
+    const pipeRegex = /\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(%>%|\[|\$)/g;
+    let match;
+    while ((match = pipeRegex.exec(card.code)) !== null) {
+      datasetReferences.add(match[1]);
+    }
+  });
+
+  // Check if all referenced datasets are in registry
+  const registeredDatasets = new Set(Object.keys(datasetRegistry.datasets || {}));
+  datasetReferences.forEach(ref => {
+    // Skip common R objects that aren't datasets
+    if (['c', 'list', 'data', 'frame', 'tibble', 'NULL', 'NA', 'TRUE', 'FALSE'].includes(ref)) {
+      return;
+    }
+
+    if (!registeredDatasets.has(ref)) {
+      warnings.push(`Code references dataset '${ref}' but it's not in the dataset registry`);
+    }
+  });
+
+  return { errors, warnings };
+}
+
+/**
  * Helper: Build complete reproducible R script
  * @param {Object} datasetRegistry - Full dataset registry
  * @param {Array} codeChain - Ordered array of code cards
@@ -3619,12 +3698,10 @@ function generateDatasetLoadCode(datasets) {
 function buildReproducibleScript(datasetRegistry, codeChain) {
   const parts = [];
 
-  // 1. Library loading
+  // 1. Library loading - collect all required libraries from code chain
+  const requiredLibraries = collectRequiredLibraries(codeChain);
   parts.push(`# Load required libraries
-library(dplyr)
-library(ggplot2)
-library(tidyr)
-library(scales)
+${requiredLibraries.map(lib => `library(${lib})`).join('\n')}
 `);
 
   // 2. Snowflake connection (if any Snowflake datasets exist)
@@ -3648,10 +3725,13 @@ library(scales)
     parts.push(`# Load datasets\n${datasetCode}`);
   }
 
-  // 4. All code in execution order
+  // 4. All code in execution order - strip redundant library calls
   if (codeChain.length > 0) {
     parts.push(`# Analysis code`);
-    parts.push(codeChain.map(card => card.code).join('\n\n'));
+    const cleanedCode = codeChain.map(card =>
+      stripRedundantLibraryCalls(card.code, requiredLibraries)
+    ).join('\n\n');
+    parts.push(cleanedCode);
   }
 
   return parts.join('\n');
@@ -3857,6 +3937,9 @@ async function generateQuartoReportWithCode(reportsDir, timestamp, title, date, 
   const favoritedCardIds = findings.map(f => f.cardId);
   const codeChain = buildCodeChain(favoritedCardIds, codeCards);
 
+  // Collect all required libraries from code chain
+  const requiredLibraries = collectRequiredLibraries(codeChain);
+
   // Start Quarto document
   let qmdContent = `---
 title: "${title}"
@@ -3873,10 +3956,7 @@ format:
 
 \`\`\`{r setup}
 #| include: false
-library(dplyr)
-library(ggplot2)
-library(tidyr)
-library(scales)
+${requiredLibraries.map(lib => `library(${lib})`).join('\n')}
 \`\`\`
 `;
 
@@ -3934,8 +4014,9 @@ ${datasetCode}
       qmdContent += `${finding.description}\n\n`;
     }
 
-    // Add the R code that generated this output
-    qmdContent += `\`\`\`{r}\n${card.code}\n\`\`\`\n\n`;
+    // Add the R code that generated this output - strip redundant library calls
+    const cleanedCode = stripRedundantLibraryCalls(card.code, requiredLibraries);
+    qmdContent += `\`\`\`{r}\n${cleanedCode}\n\`\`\`\n\n`;
   });
 
   // Write the .qmd file
@@ -4311,6 +4392,17 @@ app.post('/api/export-quarto', async (req, res) => {
       return res.status(400).json({ error: 'Missing required export data' });
     }
 
+    // Validate export data for potential issues
+    const validation = validateExportData(codeCards, datasetRegistry);
+    if (validation.warnings.length > 0) {
+      console.warn('[Quarto Export Validation] Warnings detected:');
+      validation.warnings.forEach(warning => console.warn(`  - ${warning}`));
+    }
+    if (validation.errors.length > 0) {
+      console.error('[Quarto Export Validation] Errors detected:');
+      validation.errors.forEach(error => console.error(`  - ${error}`));
+    }
+
     // Create reports directory if it doesn't exist
     const reportsDir = join(__dirname, 'reports');
     await mkdir(reportsDir, { recursive: true });
@@ -4327,7 +4419,8 @@ app.post('/api/export-quarto', async (req, res) => {
       success: true,
       qmdPath: qmdPath,
       qmdFilename: qmdFilename,
-      downloadUrl: `/reports/${qmdFilename}`
+      downloadUrl: `/api/download/report/${qmdFilename}`,
+      filename: qmdFilename  // For download attribute
     });
   } catch (error) {
     console.error('Error exporting Quarto report:', error);
@@ -4345,6 +4438,21 @@ app.post('/api/export-jupyter', async (req, res) => {
     if (!title || !findings || !codeCards || !datasetRegistry) {
       return res.status(400).json({ error: 'Missing required export data' });
     }
+
+    // Validate export data for potential issues
+    const validation = validateExportData(codeCards, datasetRegistry);
+    if (validation.warnings.length > 0) {
+      console.warn('[Jupyter Export Validation] Warnings detected:');
+      validation.warnings.forEach(warning => console.warn(`  - ${warning}`));
+    }
+    if (validation.errors.length > 0) {
+      console.error('[Jupyter Export Validation] Errors detected:');
+      validation.errors.forEach(error => console.error(`  - ${error}`));
+    }
+
+    // DEBUG: Log dataset registry structure
+    console.log('[Jupyter Export] Dataset Registry:', JSON.stringify(datasetRegistry, null, 2));
+    console.log('[Jupyter Export] Datasets object:', JSON.stringify(datasetRegistry?.datasets, null, 2));
 
     // Create reports directory if it doesn't exist
     const reportsDir = join(__dirname, 'reports');
@@ -4371,16 +4479,13 @@ app.post('/api/export-jupyter', async (req, res) => {
       source: ['## Setup\n']
     });
 
+    // Collect all required libraries from code chain
+    const requiredLibraries = collectRequiredLibraries(codeChain);
     cells.push({
       cell_type: 'code',
       execution_count: null,
       metadata: {},
-      source: [
-        'library(dplyr)\n',
-        'library(ggplot2)\n',
-        'library(tidyr)\n',
-        'library(scales)'
-      ],
+      source: requiredLibraries.map(lib => `library(${lib})\n`),
       outputs: []
     });
 
@@ -4417,7 +4522,12 @@ app.post('/api/export-jupyter', async (req, res) => {
 
     // Dataset loading
     const datasetCode = generateDatasetLoadCode(datasetRegistry.datasets || {});
+    console.log('[Jupyter Export] Generated dataset loading code:', datasetCode);
+    console.log('[Jupyter Export] Dataset code length:', datasetCode.length);
+    console.log('[Jupyter Export] Dataset code trimmed length:', datasetCode.trim().length);
+
     if (datasetCode.trim()) {
+      console.log('[Jupyter Export] Adding dataset loading cells');
       cells.push({
         cell_type: 'markdown',
         metadata: {},
@@ -4431,6 +4541,8 @@ app.post('/api/export-jupyter', async (req, res) => {
         source: datasetCode.split('\n').map(line => line + '\n'),
         outputs: []
       });
+    } else {
+      console.warn('[Jupyter Export] ⚠️  No dataset loading code generated - datasetCode is empty!');
     }
 
     // Analysis cells - one markdown + code cell per finding
@@ -4455,12 +4567,13 @@ app.post('/api/export-jupyter', async (req, res) => {
         });
       }
 
-      // Code cell
+      // Code cell - strip redundant library calls
+      const cleanedCode = stripRedundantLibraryCalls(card.code, requiredLibraries);
       cells.push({
         cell_type: 'code',
         execution_count: null,
         metadata: {},
-        source: card.code.split('\n').map(line => line + '\n'),
+        source: cleanedCode.split('\n').map(line => line + '\n'),
         outputs: []
       });
     });
@@ -4497,7 +4610,7 @@ app.post('/api/export-jupyter', async (req, res) => {
       success: true,
       filename: filename,
       filepath: filepath,
-      downloadUrl: `/reports/${filename}`
+      downloadUrl: `/api/download/report/${filename}`
     });
   } catch (error) {
     console.error('Error exporting Jupyter notebook:', error);
@@ -4505,7 +4618,45 @@ app.post('/api/export-jupyter', async (req, res) => {
   }
 });
 
-// Serve reports directory
+// Dedicated download endpoint with proper Content-Disposition headers
+// IMPORTANT: Must be under /api/ to be proxied by Vite dev server
+app.get('/api/download/report/:filename', (req, res) => {
+  console.log('🔽 Download endpoint hit! Filename:', req.params.filename);
+  const { filename } = req.params;
+  const filepath = join(__dirname, 'reports', filename);
+
+  // Security: Prevent directory traversal
+  if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+    console.log('❌ Security check failed - invalid filename');
+    return res.status(400).json({ error: 'Invalid filename' });
+  }
+
+  // Check if file exists
+  if (!existsSync(filepath)) {
+    console.log('❌ File not found:', filepath);
+    return res.status(404).json({ error: 'File not found' });
+  }
+
+  console.log('✅ Sending file with download headers:', filename);
+
+  // Set Content-Disposition header to force download
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+  // Set correct Content-Type based on file extension
+  if (filename.endsWith('.ipynb')) {
+    res.setHeader('Content-Type', 'application/x-ipynb+json');
+  } else if (filename.endsWith('.qmd')) {
+    res.setHeader('Content-Type', 'text/plain');
+  } else if (filename.endsWith('.html')) {
+    res.setHeader('Content-Type', 'text/html');
+  }
+
+  // Send the file
+  res.sendFile(filepath);
+});
+
+// Serve reports directory for viewing (HTML reports)
+// This comes AFTER the download endpoint so download requests are handled first
 app.use('/reports', express.static(join(__dirname, 'reports')));
 
 // ==================== WORKSPACE PERSISTENCE ====================
