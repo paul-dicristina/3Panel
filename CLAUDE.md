@@ -229,6 +229,135 @@ const [favoritedOutputDescriptions, setFavoritedOutputDescriptions] = useState({
 </div>
 ```
 
+### Font Toggle Feature
+
+**Status:** Fully Implemented (2026-01-30)
+
+The Font Toggle feature allows users to switch between serif and sans-serif fonts in Report mode for better readability and presentation preferences.
+
+#### User Interface
+
+**Toolbar Button (Report Mode Only)**
+
+Located in the toolbar, visible only when `viewMode === 'report'`:
+
+- **Icon**: "Aa" text styled in the current font family
+- **Position**: Between "Redo" button and Export Report separator
+- **Behavior**: Toggles between serif and sans-serif on click
+- **Tooltip**:
+  - When serif active: "Switch to Sans Serif font"
+  - When sans-serif active: "Switch to Serif font"
+- **Styling**:
+  - Hover effect: `hover:bg-gray-200`
+  - Text size: `text-[12px]`
+  - Font weight: `font-medium`
+  - Color: `text-gray-700`
+
+#### Font Families
+
+**Sans-Serif (Default):**
+```css
+-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif
+```
+- System fonts for optimal rendering on each platform
+- Clean, modern appearance
+- Default state for new conversations
+
+**Serif:**
+```css
+Georgia, "Times New Roman", Times, serif
+```
+- Traditional, formal appearance
+- Better for long-form reading
+- Professional presentation style
+
+#### Implementation Details
+
+**State Variable** ([src/App.jsx:85](src/App.jsx#L85)):
+```javascript
+const [reportFontStyle, setReportFontStyle] = useState('sans-serif'); // 'serif' or 'sans-serif'
+```
+
+**Toggle Button** ([src/App.jsx:2834-2844](src/App.jsx#L2834-L2844)):
+```javascript
+{/* Font Toggle - only visible in Report mode */}
+{viewMode === 'report' && (
+  <button
+    onClick={() => setReportFontStyle(prev => prev === 'serif' ? 'sans-serif' : 'serif')}
+    className="flex items-center gap-1 hover:bg-gray-200 rounded transition-colors px-1"
+    title={reportFontStyle === 'serif' ? "Switch to Sans Serif font" : "Switch to Serif font"}
+  >
+    <span className="text-[12px] font-medium text-gray-700" style={{ fontFamily: reportFontStyle === 'serif' ? 'serif' : 'sans-serif' }}>
+      {reportFontStyle === 'serif' ? 'Aa' : 'Aa'}
+    </span>
+  </button>
+)}
+```
+
+**Font Application** ([src/App.jsx:3135](src/App.jsx#L3135)):
+```javascript
+<div className="h-full p-6" style={{
+  fontFamily: reportFontStyle === 'serif'
+    ? 'Georgia, "Times New Roman", Times, serif'
+    : '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+}}>
+```
+
+The font style is applied to the entire report panel container, affecting:
+- Report title
+- Dataset description
+- Section headings
+- Section descriptions
+- All text content in favorited outputs
+
+#### Persistence
+
+The font preference is automatically saved and restored across sessions:
+
+**Save to localStorage** ([src/App.jsx:156](src/App.jsx#L156)):
+```javascript
+state: serializeState({
+  // ... other state
+  reportFontStyle
+})
+```
+
+**Load from localStorage** ([src/App.jsx:281](src/App.jsx#L281)):
+```javascript
+setReportFontStyle(typeof state.reportFontStyle === 'string' ? state.reportFontStyle : 'sans-serif');
+```
+
+**Auto-save on change** ([src/App.jsx:600](src/App.jsx#L600)):
+```javascript
+useEffect(() => {
+  debouncedSave();
+}, [
+  // ... other dependencies
+  reportFontStyle
+]);
+```
+
+#### User Experience
+
+1. User switches to Report mode
+2. Font toggle button appears in toolbar (shows "Aa" in current font)
+3. User clicks button → font instantly changes throughout report
+4. User's preference persists across:
+   - Mode switches (Explore ↔ Report)
+   - Page reloads
+   - Browser sessions
+5. "New Conversation" resets font to default (sans-serif)
+
+#### Future Enhancements
+
+Potential improvements (out of scope for v1):
+
+- Additional font families (monospace for code-heavy reports)
+- Font size adjustment (small, medium, large)
+- Line height/spacing controls
+- Font pairing presets (title font + body font)
+- Export with selected font style embedded in HTML/PDF
+
 ---
 
 ## Report Rewrite Feature
@@ -563,16 +692,18 @@ The rewrite feature integrates with 3Panel's conversation persistence system:
 
 ## Multi-Format Report Export
 
-**Status:** Fully Implemented (2026-01-17)
+**Status:** Fully Implemented (2026-01-30)
 
-3Panel supports exporting reports in multiple formats with full reproducible code for Quarto and Jupyter notebooks. Users can export their analysis reports with a single click using a dropdown menu.
+3Panel supports exporting reports in multiple formats with full reproducible code for Quarto, Jupyter, and LaTeX. Users can export their analysis reports with a single click using a dropdown menu.
 
 ### Key Features
 
-- **4 Export Formats**: HTML, Quarto (.qmd), Jupyter Notebook (.ipynb), PDF
-- **Full Code Reproducibility**: Quarto and Jupyter exports include ALL code needed to reproduce results
+- **5 Export Formats**: HTML, Quarto (.qmd), LaTeX (.tex), Jupyter Notebook (.ipynb), PDF
+- **Full Code Reproducibility**: Quarto, LaTeX, and Jupyter exports include ALL code needed to reproduce results
 - **Automatic Dataset Loading**: Generates code to load CSV files and connect to Snowflake
 - **Smart Code Chain Building**: Includes all prerequisite code for favorited outputs
+- **Optional PDF Compilation**: LaTeX export automatically compiles to PDF if pdflatex is available
+- **Vector Graphics**: LaTeX export converts SVG plots to PDF for high-quality publication output
 - **Single-Gesture UI**: Click Export → Select format → Done
 
 ### Export Formats
@@ -629,7 +760,103 @@ ggplot(lex_tidy, aes(year, life_expectancy)) +
 ```
 ```
 
-#### 3. Jupyter Notebook Export (.ipynb)
+#### 3. LaTeX Export (.tex)
+- **Output**: LaTeX document with full reproducible code
+- **Code Included**: Yes - full reproducible script
+- **Behavior**: Downloads .tex file (and .pdf if LaTeX is installed)
+- **Use Case**: Academic papers, publication-quality PDFs, professional typesetting
+- **Requirements**: None for .tex generation; LaTeX distribution (TeX Live, MiKTeX) for PDF compilation
+
+**Document Structure:**
+```latex
+\documentclass[11pt,letterpaper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{float}
+
+% Code listing configuration for R
+\lstset{
+  language=R,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue},
+  commentstyle=\color{gray},
+  stringstyle=\color{red},
+  frame=single,
+  breaklines=true
+}
+
+\title{Report Title}
+\date{1/30/2026}
+\author{3Panel Data Analysis}
+
+\begin{document}
+\maketitle
+
+\section{Setup}
+
+\subsection{Required Libraries}
+\begin{lstlisting}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(scales)
+\end{lstlisting}
+
+\subsection{Load Datasets}
+\begin{lstlisting}
+# Load CSV file (ensure lex.csv is in working directory)
+lex <- read.csv("lex.csv")
+\end{lstlisting}
+
+\section{Life Expectancy Trends}
+
+This visualization shows how life expectancy has changed over time...
+
+\begin{lstlisting}
+ggplot(lex_tidy, aes(year, life_expectancy)) +
+  geom_line() +
+  theme_minimal()
+\end{lstlisting}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{plot_1.pdf}
+\caption{Life expectancy trends visualization}
+\end{figure}
+
+\end{document}
+```
+
+**Plot Handling:**
+- SVG plots are automatically converted to PDF using a 3-tier fallback strategy:
+  1. **rsvg-convert** (librsvg) - Best quality vector PDF
+  2. **ImageMagick convert** - Good quality vector PDF
+  3. **sharp PNG** at 300 DPI - Fallback raster format
+- Plots are embedded with `\includegraphics[width=0.85\textwidth]{filename}`
+- All conversions produce publication-quality output suitable for journals
+
+**Automatic PDF Compilation:**
+- If `pdflatex` is detected on the system, the .tex file is automatically compiled to PDF
+- Compilation runs twice (for cross-references and table of contents)
+- Auxiliary files (.aux, .log, .out) are automatically cleaned up
+- Both .tex and .pdf files download if compilation succeeds
+- If compilation fails or pdflatex is unavailable, .tex file is still provided for manual compilation
+
+**Special Character Handling:**
+- Report titles, descriptions, and headings have LaTeX special characters escaped
+- Handles: & % $ # _ { } ~ ^ \
+- Code blocks use `lstlisting` environment (no escaping needed)
+
+**Snowflake Integration:**
+- If datasets are from Snowflake, includes commented connection template
+- User must configure credentials before running code
+
+#### 4. Jupyter Notebook Export (.ipynb)
 - **Output**: Jupyter notebook with R kernel
 - **Code Included**: Yes - full reproducible script
 - **Behavior**: Downloads .ipynb file
@@ -642,7 +869,7 @@ ggplot(lex_tidy, aes(year, life_expectancy)) +
 - Analysis cells: Heading (markdown) + Description (markdown) + Code (code)
 - Empty output cells (forces user to run code)
 
-#### 4. PDF Export
+#### 5. PDF Export
 - **Output**: PDF document (via browser print)
 - **Code Included**: No (visual report only)
 - **Behavior**: Opens HTML in new window, triggers print dialog
@@ -687,6 +914,12 @@ When user clicks the Export Report button, a modal dialog appears with format se
 │  │ [Quarto Icon] Quarto (.qmd)                   │  │
 │  │ 53x53px       Reproducible document with      │  │
 │  │               full code for RStudio            │  │
+│  └───────────────────────────────────────────────┘  │
+│                                                      │
+│  ┌───────────────────────────────────────────────┐  │
+│  │ [LaTeX Icon] LaTeX (.tex)                     │  │
+│  │ 53x53px      Professional document for        │  │
+│  │              publication-quality PDFs          │  │
 │  └───────────────────────────────────────────────┘  │
 │                                                      │
 │  ┌───────────────────────────────────────────────┐  │
@@ -821,7 +1054,14 @@ When user hovers over a format button, the icon animates with a smooth pulse eff
    - Calls `generateQuartoReportWithCode()`
    - Returns: `{ success, qmdPath, qmdFilename, downloadUrl }`
 
-2. **POST /api/export-jupyter** (lines 4052-4217)
+2. **POST /api/export-latex** (lines 4927-5047)
+   - Accepts: `{ title, date, findings, codeCards, datasetRegistry }`
+   - Calls `generateLatexDocument()`
+   - Checks for LaTeX availability with `checkLatexAvailable()`
+   - Optionally compiles to PDF with `pdflatex` (runs twice)
+   - Returns: `{ success, texPath, texFilename, downloadUrl, pdfGenerated, pdfFilename, pdfDownloadUrl, plotFiles, hasLatex }`
+
+3. **POST /api/export-jupyter** (lines 4052-4217)
    - Accepts: `{ title, findings, codeCards, datasetRegistry }`
    - Builds Jupyter notebook JSON structure
    - Returns: `{ success, filename, filepath, downloadUrl }`
@@ -984,6 +1224,12 @@ const formatOptions = [
     label: 'Quarto (.qmd)',
     description: 'Reproducible document with full code for RStudio',
     icon: '/quarto-icon.svg'
+  },
+  {
+    id: 'latex',
+    label: 'LaTeX (.tex)',
+    description: 'Professional document for publication-quality PDFs',
+    icon: '/latex-icon.svg'
   },
   {
     id: 'jupyter',
@@ -1309,6 +1555,34 @@ This wraps the handler in an arrow function, preventing the event from being pas
 **Location:** Toolbar, between mode selector and favorite button
 
 **Rationale:** Button name clarifies it exports existing favorited content; disable state prevents confusion when report is empty
+
+#### Font Toggle Button (2026-01-30)
+
+**Change:** Added font toggle button to toolbar for Report mode
+
+**Button appearance:**
+- **Icon:** "Aa" text styled in current font family
+- **Position:** Between Redo button and Export Report separator
+- **Visible:** Only in Report mode
+- **Behavior:** Toggles between serif and sans-serif fonts
+- **Tooltip:** "Switch to Sans Serif font" or "Switch to Serif font" (depending on current state)
+
+**Fonts:**
+- **Sans-serif (default):** System fonts (-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, etc.)
+- **Serif:** Georgia, "Times New Roman", Times, serif
+
+**Persistence:**
+- Font preference saved to localStorage
+- Restored across page reloads and sessions
+- Reset to default (sans-serif) on "New Conversation"
+
+**Implementation:**
+- State: [App.jsx:85](src/App.jsx#L85)
+- Button: [App.jsx:2834-2844](src/App.jsx#L2834-L2844)
+- Font application: [App.jsx:3135](src/App.jsx#L3135)
+- Persistence: [App.jsx:156, 281, 600](src/App.jsx#L156)
+
+**Rationale:** Users can switch between serif (formal, professional) and sans-serif (modern, clean) fonts based on report purpose and personal preference
 
 ---
 
@@ -2961,7 +3235,7 @@ Potential improvements (out of scope for v1):
 | File | Purpose | Lines |
 |------|---------|-------|
 | `server.js` | Backend logic for suggestions, dataset tracking, export & R workspace persistence | 79-4300 |
-| `src/App.jsx` | Frontend dataset registry, code execution, export UI & conversation persistence | 52-2800 |
+| `src/App.jsx` | Frontend dataset registry, code execution, export UI, font toggle & conversation persistence | 52-2800 |
 | `src/components/InteractiveSuggestion.jsx` | Interactive UI component | 1-416 |
 | `src/components/ReportRewriteModal.jsx` | Report rewrite dialog with style options | 1-200 |
 | `src/components/ExportReportModal.jsx` | Export format selection modal with icons, progress animation & ESC key support | 1-111 |
@@ -2970,6 +3244,7 @@ Potential improvements (out of scope for v1):
 | `src/utils/claudeApi.js` | API communication with active dataset | 20-35 |
 | `src/utils/persistence.js` | Conversation persistence utilities | 1-171 |
 | `src/index.css` | Styles for interactive elements, export button animation | 1-435 |
+| `public/latex-icon.svg` | LaTeX export format icon (53x53px) | N/A |
 | `.r-workspace.RData` | Persistent R workspace storage (gitignored) | N/A |
 
 ### Important Functions
@@ -2979,12 +3254,19 @@ Potential improvements (out of scope for v1):
 - `app.post('/api/execute-r')` - R code execution with metadata refresh
 - `app.post('/api/clear-workspace')` - Clear R workspace (temp + persistent)
 - `app.post('/api/export-quarto')` - Export Quarto document with full reproducible code
+- `app.post('/api/export-latex')` - Export LaTeX document with full reproducible code and optional PDF compilation
 - `app.post('/api/export-jupyter')` - Export Jupyter notebook with full reproducible code
 - `app.post('/api/create-quarto-report')` - Create HTML report (visual only)
 - `buildCodeChain()` - Build complete code chain for reproducibility
 - `generateDatasetLoadCode()` - Generate R code to load datasets from registry
 - `buildReproducibleScript()` - Combine libraries, datasets, and analysis code into standalone script
 - `generateQuartoReportWithCode()` - Generate Quarto document with full code
+- `generateLatexDocument()` - Generate LaTeX document with full code, plot conversion, and proper escaping
+- `checkLatexAvailable()` - Check if pdflatex is installed on system
+- `convertSvgToPdf()` - Convert SVG plots to PDF using 3-tier fallback (rsvg-convert, ImageMagick, sharp PNG)
+- `collectRequiredLibraries()` - Scan code for library() calls and return sorted array
+- `stripRedundantLibraryCalls()` - Remove library calls already in setup section
+- `validateExportData()` - Validate export data and check for potential issues
 - `saveWorkspaceOnShutdown()` - Save R workspace to persistent storage on SIGINT/SIGTERM
 - `loadWorkspaceOnStartup()` - Restore R workspace from persistent storage on server start
 - `executeRWorkspaceOperation()` - Helper to execute R code for workspace operations
@@ -2992,7 +3274,7 @@ Potential improvements (out of scope for v1):
 **Frontend:**
 - `handleSendMessage()` - Sends messages with active dataset
 - `executeRCode()` - Executes R code and updates registry
-- `handleExportReport(format)` - Export report in specified format (html/quarto/jupyter/pdf)
+- `handleExportReport(format)` - Export report in specified format (html/quarto/latex/jupyter/pdf)
 - `handleRewriteReport()` - Rewrite and reorganize report with Claude AI
 - `handleUndoRewrite()` - Undo last report rewrite
 - `handleRedoRewrite()` - Redo last undone rewrite

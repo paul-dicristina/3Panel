@@ -30,6 +30,12 @@ const ExportReportModal = ({ isOpen, onExport, onCancel, isExporting }) => {
       icon: '/quarto-icon.svg'
     },
     {
+      id: 'latex',
+      label: 'LaTeX (.tex)',
+      description: 'Professional document for publication-quality PDFs',
+      icon: '/latex-icon.svg'
+    },
+    {
       id: 'jupyter',
       label: 'Jupyter Notebook (.ipynb)',
       description: 'Reproducible notebook with R kernel',

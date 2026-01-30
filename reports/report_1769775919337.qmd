@@ -1,0 +1,68 @@
+---
+title: "Determinants of Adult Obesity Prevalence in the United States"
+date: "1/30/2026"
+format:
+  html:
+    embed-resources: true
+    theme: default
+    toc: false
+    code-fold: false
+---
+
+## Setup
+
+```{r setup}
+#| include: false
+library(dplyr)
+library(ggplot2)
+library(maps)
+library(scales)
+library(tidyr)
+```
+
+```{r load-data}
+# Load CSV file (ensure Nutrition_Physical_Activity_and_Obesity.csv is in working directory)
+Nutrition_Physical_Activity_and_Obesity <- read.csv("Nutrition_Physical_Activity_and_Obesity.csv")
+
+```
+
+## Geographic Distribution of Adult Obesity Rates (2023)
+
+Choropleth visualization of state-level adult obesity prevalence reveals statistically significant geographic clustering, with elevated rates concentrated in the Southern and Midwestern census regions. States including West Virginia, Mississippi, and Louisiana exhibit the highest prevalence estimates, while Colorado and Northeastern states demonstrate comparatively lower obesity rates. This spatial heterogeneity suggests regionally-mediated environmental, socioeconomic, or behavioral determinants warrant further epidemiological investigation.
+
+```{r}
+
+# Filter for obesity data in 2023, overall totals by state
+obesity_2023 <- Nutrition_Physical_Activity_and_Obesity %>%
+  filter(YearStart == 2023,
+         Topic == "Obesity / Weight Status",
+         Question == "Percent of adults aged 18 years and older who have obesity",
+         StratificationCategory1 == "Total",
+         !LocationAbbr %in% c("US", "GU", "PR", "VI")) %>%
+  group_by(LocationDesc) %>%
+  summarize(obesity_rate = mean(Data_Value, na.rm = TRUE), .groups = "drop") %>%
+  mutate(region = tolower(LocationDesc))
+
+# Get US state map data
+states_map <- map_data("state")
+
+# Join obesity data with map data
+map_data_joined <- states_map %>%
+  left_join(obesity_2023, by = "region")
+
+# Create choropleth
+ggplot(map_data_joined, aes(x = long, y = lat, group = group, fill = obesity_rate)) +
+  geom_polygon(color = "white", linewidth = 0.2) +
+  scale_fill_gradient(low = "#fee8c8", high = "#b30000", 
+                      name = "Obesity Rate (%)",
+                      na.value = "grey80") +
+  coord_fixed(1.3) +
+  theme_void() +
+  labs(title = "Adult Obesity Rates by State (2023)",
+       subtitle = "Percent of adults aged 18+ with obesity",
+       caption = "Source: Behavioral Risk Factor Surveillance System") +
+  theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+        plot.subtitle = element_text(size = 10, hjust = 0.5),
+        legend.position = "right")
+```
+

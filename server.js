@@ -94,6 +94,86 @@ function executeRWorkspaceOperation(rCode) {
 }
 
 /**
+ * Check if LaTeX (pdflatex) is available on the system
+ * @returns {Promise<boolean>} True if pdflatex is available, false otherwise
+ */
+function checkLatexAvailable() {
+  return new Promise((resolve) => {
+    exec('pdflatex --version', { timeout: 2000 }, (error, stdout, stderr) => {
+      if (error) {
+        console.log('LaTeX not available:', error.message);
+        resolve(false);
+      } else {
+        console.log('LaTeX version:', stdout.split('\n')[0].trim());
+        resolve(true);
+      }
+    });
+  });
+}
+
+/**
+ * Convert SVG content to PDF file using available tools
+ * Tries multiple conversion methods in order of quality:
+ * 1. rsvg-convert (best quality vector output)
+ * 2. ImageMagick convert (good quality vector output)
+ * 3. sharp PNG at 300 DPI (fallback raster output)
+ *
+ * @param {string} svgContent - SVG content as string
+ * @param {string} outputPath - Path to save PDF/PNG file
+ * @returns {Promise<void>}
+ */
+async function convertSvgToPdf(svgContent, outputPath) {
+  // Write SVG to temp file
+  const tmpSvgPath = join(tmpdir(), `temp_${Date.now()}.svg`);
+  await writeFile(tmpSvgPath, svgContent, 'utf-8');
+
+  try {
+    // Try rsvg-convert first (best quality - vector PDF)
+    try {
+      await new Promise((resolve, reject) => {
+        exec(`rsvg-convert -f pdf -o "${outputPath}" "${tmpSvgPath}"`, (error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+      console.log(`✓ Converted plot to PDF using rsvg-convert: ${outputPath}`);
+      return;
+    } catch (rsvgError) {
+      // rsvg not available, try ImageMagick
+    }
+
+    // Try ImageMagick convert (good quality - vector PDF)
+    try {
+      await new Promise((resolve, reject) => {
+        exec(`convert -density 300 "${tmpSvgPath}" "${outputPath}"`, (error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+      console.log(`✓ Converted plot to PDF using ImageMagick: ${outputPath}`);
+      return;
+    } catch (convertError) {
+      // ImageMagick not available, use sharp as fallback
+    }
+
+    // Final fallback: Use sharp to create high-res PNG
+    console.warn('⚠ Vector conversion tools unavailable, using PNG fallback');
+    const pngPath = outputPath.replace('.pdf', '.png');
+
+    await sharp(Buffer.from(svgContent))
+      .png({ quality: 100 })
+      .resize({ width: 2400 }) // 8 inches at 300 DPI
+      .toFile(pngPath);
+
+    console.log(`✓ Converted plot to PNG (fallback): ${pngPath}`);
+
+  } finally {
+    // Clean up temp SVG file
+    await unlink(tmpSvgPath).catch(() => {});
+  }
+}
+
+/**
  * POST /api/chat
  * Proxy endpoint for Claude API requests
  *
@@ -4026,6 +4106,224 @@ ${datasetCode}
   return { qmdPath, qmdFilename };
 }
 
+/**
+ * Generate LaTeX document with full reproducible code
+ * @param {string} reportsDir - Directory to save report files
+ * @param {number} timestamp - Timestamp for unique filenames
+ * @param {string} title - Report title
+ * @param {string} date - Report date
+ * @param {Array} findings - Array of {cardId, heading, description}
+ * @param {Array} codeCards - All code cards from session
+ * @param {Object} datasetRegistry - Dataset registry with metadata
+ * @returns {Promise<{texPath: string, texFilename: string, plotFiles: Array<string>}>}
+ */
+async function generateLatexDocument(reportsDir, timestamp, title, date, findings, codeCards, datasetRegistry) {
+  const texFilename = `report_${timestamp}.tex`;
+  const texPath = join(reportsDir, texFilename);
+  const plotFiles = []; // Track generated plot PDFs
+
+  // Build code chain from favorited cards
+  const favoritedCardIds = findings.map(f => f.cardId);
+  const codeChain = buildCodeChain(favoritedCardIds, codeCards);
+
+  // Collect all required libraries from code chain
+  const requiredLibraries = collectRequiredLibraries(codeChain);
+
+  // Helper: Escape LaTeX special characters (except in code blocks)
+  const escapeLatex = (text) => {
+    if (!text) return '';
+    return text
+      .replace(/\\/g, '\\textbackslash{}')
+      .replace(/&/g, '\\&')
+      .replace(/%/g, '\\%')
+      .replace(/\$/g, '\\$')
+      .replace(/#/g, '\\#')
+      .replace(/_/g, '\\_')
+      .replace(/\{/g, '\\{')
+      .replace(/\}/g, '\\}')
+      .replace(/~/g, '\\textasciitilde{}')
+      .replace(/\^/g, '\\textasciicircum{}');
+  };
+
+  // Start LaTeX document
+  let texContent = `\\documentclass[11pt,letterpaper]{article}
+
+% Essential packages
+\\usepackage[utf8]{inputenc}
+\\usepackage[T1]{fontenc}
+\\usepackage[margin=1in]{geometry}
+\\usepackage{graphicx}
+\\usepackage{xcolor}
+\\usepackage{hyperref}
+\\usepackage{listings}
+\\usepackage{float}
+
+% Configure hyperlinks
+\\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue,
+    citecolor=blue
+}
+
+% Configure code listings
+\\lstset{
+    language=R,
+    basicstyle=\\ttfamily\\small,
+    keywordstyle=\\color{blue},
+    commentstyle=\\color{gray}\\itshape,
+    stringstyle=\\color{red},
+    numbers=left,
+    numberstyle=\\tiny\\color{gray},
+    stepnumber=1,
+    numbersep=8pt,
+    backgroundcolor=\\color{gray!10},
+    frame=single,
+    breaklines=true,
+    breakatwhitespace=false,
+    showstringspaces=false,
+    xleftmargin=2em,
+    framexleftmargin=1.5em
+}
+
+\\title{${escapeLatex(title)}}
+\\date{${escapeLatex(date)}}
+\\author{Generated by 3Panel}
+
+\\begin{document}
+\\maketitle
+
+`;
+
+  // Add Snowflake connection note if needed
+  const hasSnowflake = Object.values(datasetRegistry.datasets || {}).some(d => d.source === 'snowflake');
+  if (hasSnowflake) {
+    texContent += `\\section*{Note: Snowflake Connection Required}
+
+This report uses Snowflake data. Uncomment and configure the connection code below:
+
+\\begin{lstlisting}
+library(DBI)
+library(odbc)
+conn <- dbConnect(odbc::odbc(),
+  Driver = "Snowflake",
+  Server = "your-account.snowflakecomputing.com",
+  UID = "your-username",
+  authenticator = "externalbrowser"
+)
+\\end{lstlisting}
+
+`;
+  }
+
+  // Setup section
+  texContent += `\\section{Setup}
+
+\\subsection{Required Libraries}
+
+\\begin{lstlisting}
+${requiredLibraries.map(lib => `library(${lib})`).join('\n')}
+\\end{lstlisting}
+
+`;
+
+  // Add dataset loading code
+  const datasetCode = generateDatasetLoadCode(datasetRegistry.datasets || {});
+  if (datasetCode.trim()) {
+    texContent += `\\subsection{Load Datasets}
+
+\\begin{lstlisting}
+${datasetCode}
+\\end{lstlisting}
+
+`;
+  }
+
+  // Add each finding with its code and plots
+  for (let idx = 0; idx < findings.length; idx++) {
+    const finding = findings[idx];
+    const card = codeCards.find(c => c.id === finding.cardId);
+
+    if (!card) continue;
+
+    // Add heading
+    if (finding.heading) {
+      texContent += `\\section{${escapeLatex(finding.heading)}}\n\n`;
+    } else {
+      texContent += `\\section{Analysis ${idx + 1}}\n\n`;
+    }
+
+    // Add description
+    if (finding.description) {
+      texContent += `${escapeLatex(finding.description)}\n\n`;
+    }
+
+    // Add the R code that generated this output (strip redundant library calls)
+    const cleanedCode = stripRedundantLibraryCalls(card.code, requiredLibraries);
+    texContent += `\\begin{lstlisting}\n${cleanedCode}\n\\end{lstlisting}\n\n`;
+
+    // Process plots: Convert SVG to PDF and embed
+    if (card.output?.plots && card.output.plots.length > 0) {
+      for (let plotIdx = 0; plotIdx < card.output.plots.length; plotIdx++) {
+        const plot = card.output.plots[plotIdx];
+
+        // Skip HTML widgets (can't embed in LaTeX easily)
+        if (plot.type === 'html') {
+          texContent += `\\textit{Note: Interactive HTML widget omitted from LaTeX export}\\\\[0.5em]\n\n`;
+          continue;
+        }
+
+        // Handle SVG plots
+        if (plot.type === 'image' && plot.data) {
+          const svgContent = plot.data;
+
+          // Convert SVG to PDF using helper function
+          const plotPdfFilename = `plot_${timestamp}_${idx}_${plotIdx}.pdf`;
+          const plotPdfPath = join(reportsDir, plotPdfFilename);
+
+          try {
+            await convertSvgToPdf(svgContent, plotPdfPath);
+            plotFiles.push(plotPdfFilename);
+
+            // Embed plot in LaTeX
+            texContent += `\\begin{figure}[H]
+\\centering
+\\includegraphics[width=0.85\\textwidth]{${plotPdfFilename}}
+\\caption{Visualization from Analysis ${idx + 1}}
+\\end{figure}
+
+`;
+          } catch (convError) {
+            console.error(`Error converting plot ${idx}-${plotIdx} to PDF:`, convError);
+            texContent += `\\textit{Error: Could not convert plot to PDF format}\\\\[0.5em]\n\n`;
+          }
+        }
+      }
+    }
+
+    // Add text output if present (escaped and verbatim)
+    if (card.output?.output && card.output.output.trim()) {
+      texContent += `\\subsection*{Output}
+
+\\begin{verbatim}
+${card.output.output.trim()}
+\\end{verbatim}
+
+`;
+    }
+  }
+
+  // Close document
+  texContent += `\\end{document}\n`;
+
+  // Write the .tex file
+  await writeFile(texPath, texContent, 'utf-8');
+  console.log(`✅ Created LaTeX file: ${texFilename}`);
+  console.log(`📊 Generated ${plotFiles.length} plot PDF files`);
+
+  return { texPath, texFilename, plotFiles };
+}
+
 // Create Quarto report endpoint with HTML fallback
 app.post('/api/create-quarto-report', async (req, res) => {
   try {
@@ -4618,6 +4916,141 @@ app.post('/api/export-jupyter', async (req, res) => {
   }
 });
 
+/**
+ * Export LaTeX document with full reproducible code
+ */
+app.post('/api/export-latex', async (req, res) => {
+  try {
+    const { title, date, findings, codeCards, datasetRegistry } = req.body;
+
+    // Validation
+    if (!title || !findings || !codeCards || !datasetRegistry) {
+      return res.status(400).json({ error: 'Missing required export data' });
+    }
+
+    if (!Array.isArray(findings) || findings.length === 0) {
+      return res.status(400).json({ error: 'No favorited outputs to export' });
+    }
+
+    // Validate export data and log warnings
+    const validation = validateExportData(codeCards, datasetRegistry);
+    if (validation.warnings.length > 0) {
+      console.warn('[LaTeX Export Validation] Warnings detected:');
+      validation.warnings.forEach(warning => console.warn(`  - ${warning}`));
+    }
+    if (validation.errors.length > 0) {
+      console.error('[LaTeX Export Validation] Errors detected:');
+      validation.errors.forEach(error => console.error(`  - ${error}`));
+    }
+
+    console.log('[LaTeX Export] Starting export...');
+    console.log(`[LaTeX Export] Title: ${title}`);
+    console.log(`[LaTeX Export] Findings: ${findings.length} outputs`);
+
+    // Create reports directory if it doesn't exist
+    const reportsDir = join(__dirname, 'reports');
+    await mkdir(reportsDir, { recursive: true });
+
+    // Generate LaTeX document
+    const timestamp = Date.now();
+    const { texPath, texFilename, plotFiles } = await generateLatexDocument(
+      reportsDir,
+      timestamp,
+      title,
+      date,
+      findings,
+      codeCards,
+      datasetRegistry
+    );
+
+    console.log(`✅ LaTeX document created: ${texFilename}`);
+    console.log(`   Plot files: ${plotFiles.length}`);
+
+    // Check if LaTeX is available for PDF compilation
+    const hasLatex = await checkLatexAvailable();
+    let pdfGenerated = false;
+    let pdfFilename = null;
+    let pdfDownloadUrl = null;
+
+    if (hasLatex) {
+      console.log('[LaTeX Export] pdflatex available, attempting compilation...');
+
+      // Compile LaTeX to PDF (run twice for references)
+      const pdfPath = texPath.replace('.tex', '.pdf');
+      pdfFilename = texFilename.replace('.tex', '.pdf');
+
+      try {
+        // First pass
+        await new Promise((resolve, reject) => {
+          exec(`cd "${reportsDir}" && pdflatex -interaction=nonstopmode "${texFilename}"`,
+            { timeout: 30000 },
+            (error, stdout, stderr) => {
+              if (error) {
+                console.warn('[LaTeX Export] First pdflatex pass failed:', error.message);
+                reject(error);
+              } else {
+                console.log('[LaTeX Export] First pdflatex pass complete');
+                resolve();
+              }
+            }
+          );
+        });
+
+        // Second pass (for references, table of contents, etc.)
+        await new Promise((resolve, reject) => {
+          exec(`cd "${reportsDir}" && pdflatex -interaction=nonstopmode "${texFilename}"`,
+            { timeout: 30000 },
+            (error, stdout, stderr) => {
+              if (error) {
+                console.warn('[LaTeX Export] Second pdflatex pass failed:', error.message);
+                reject(error);
+              } else {
+                console.log('[LaTeX Export] Second pdflatex pass complete');
+                resolve();
+              }
+            }
+          );
+        });
+
+        // Clean up auxiliary files
+        const auxFiles = ['.aux', '.log', '.out', '.toc'];
+        for (const ext of auxFiles) {
+          const auxPath = texPath.replace('.tex', ext);
+          await unlink(auxPath).catch(() => {}); // Ignore errors if files don't exist
+        }
+
+        pdfGenerated = true;
+        pdfDownloadUrl = `/api/download/report/${pdfFilename}`;
+        console.log(`✅ PDF compiled successfully: ${pdfFilename}`);
+
+      } catch (pdfError) {
+        console.error('[LaTeX Export] PDF compilation failed:', pdfError.message);
+        console.log('[LaTeX Export] .tex file is still available for manual compilation');
+        // Continue - .tex file is still valid
+      }
+    } else {
+      console.log('[LaTeX Export] pdflatex not available, .tex file only');
+    }
+
+    // Send response
+    res.json({
+      success: true,
+      texFilename,
+      texPath,
+      downloadUrl: `/api/download/report/${texFilename}`,
+      pdfGenerated,
+      pdfFilename,
+      pdfDownloadUrl,
+      plotFiles,
+      hasLatex
+    });
+
+  } catch (error) {
+    console.error('Error exporting LaTeX document:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Dedicated download endpoint with proper Content-Disposition headers
 // IMPORTANT: Must be under /api/ to be proxied by Vite dev server
 app.get('/api/download/report/:filename', (req, res) => {
@@ -4647,6 +5080,10 @@ app.get('/api/download/report/:filename', (req, res) => {
     res.setHeader('Content-Type', 'application/x-ipynb+json');
   } else if (filename.endsWith('.qmd')) {
     res.setHeader('Content-Type', 'text/plain');
+  } else if (filename.endsWith('.tex')) {
+    res.setHeader('Content-Type', 'application/x-tex');
+  } else if (filename.endsWith('.pdf')) {
+    res.setHeader('Content-Type', 'application/pdf');
   } else if (filename.endsWith('.html')) {
     res.setHeader('Content-Type', 'text/html');
   }

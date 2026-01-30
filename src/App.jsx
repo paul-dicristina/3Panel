@@ -82,6 +82,7 @@ function App() {
   const [reportDescription, setReportDescription] = useState('');
   const [favoritedOutputDescriptions, setFavoritedOutputDescriptions] = useState({});
   const [favoritedOutputHeadings, setFavoritedOutputHeadings] = useState({});
+  const [reportFontStyle, setReportFontStyle] = useState('sans-serif'); // 'serif' or 'sans-serif'
 
   // Report rewrite state
   const [showRewriteModal, setShowRewriteModal] = useState(false);
@@ -151,7 +152,8 @@ function App() {
           datasetRegistry,
           viewMode,
           selectedCardId,
-          expandedSuggestions
+          expandedSuggestions,
+          reportFontStyle
         })
       };
 
@@ -205,7 +207,8 @@ function App() {
       lastRewriteStyle,
       datasetRegistry,
       viewMode,
-      selectedCardId
+      selectedCardId,
+      reportFontStyle
     };
 
     const currentHash = hashObject(currentState);
@@ -275,6 +278,7 @@ function App() {
       setViewMode(typeof state.viewMode === 'string' ? state.viewMode : 'explore');
       setSelectedCardId(state.selectedCardId || null);
       setExpandedSuggestions(state.expandedSuggestions instanceof Set ? state.expandedSuggestions : new Set());
+      setReportFontStyle(typeof state.reportFontStyle === 'string' ? state.reportFontStyle : 'sans-serif');
 
       // NOTE: Dataset restoration warning disabled - R workspace persistence handles this automatically
       // Datasets are restored from .r-workspace.RData on server startup, so no manual reload needed
@@ -592,7 +596,8 @@ function App() {
     lastRewriteStyle,
     datasetRegistry,
     viewMode,
-    selectedCardId
+    selectedCardId,
+    reportFontStyle
   ]);
 
   // Immediate save on beforeunload
@@ -635,8 +640,8 @@ function App() {
     // Set exporting state
     setIsExporting(true);
 
-    // For Quarto and Jupyter, trigger download instead of opening window
-    const shouldDownload = format === 'quarto' || format === 'jupyter';
+    // For Quarto, Jupyter, and LaTeX, trigger download instead of opening window
+    const shouldDownload = format === 'quarto' || format === 'jupyter' || format === 'latex';
 
     // Open a blank window immediately to avoid popup blockers (only for HTML/PDF)
     // This must happen synchronously in the click handler
@@ -746,9 +751,9 @@ Please respond with a JSON object in this format:
           findingsWithCode: exportData.findings?.filter(f => f.code).length || 0,
           firstFindingHasCode: exportData.findings?.[0]?.code ? true : false
         });
-      } else if (format === 'quarto' || format === 'jupyter') {
+      } else if (format === 'quarto' || format === 'jupyter' || format === 'latex') {
         // Use new export endpoints with full code
-        endpoint = format === 'quarto' ? '/api/export-quarto' : '/api/export-jupyter';
+        endpoint = `/api/export-${format}`;
 
         // Build findings array with cardIds, headings, and descriptions
         const orderedCardIds = Array.from(favoritedCardIds);
@@ -795,7 +800,7 @@ Please respond with a JSON object in this format:
 
       console.log('Step 5: Handling export result...');
 
-      if (format === 'quarto' || format === 'jupyter') {
+      if (format === 'quarto' || format === 'jupyter' || format === 'latex') {
         // Trigger download using temporary <a> element to avoid navigating away from 3Panel
         // IMPORTANT: Use relative URL (not full URL) for download attribute to work properly
         const downloadUrl = result.downloadUrl; // Already relative: /download/report/filename
@@ -804,7 +809,7 @@ Please respond with a JSON object in this format:
         // Create temporary link element
         const link = document.createElement('a');
         link.href = downloadUrl;
-        link.download = result.filename || result.qmdFilename; // Set filename for download
+        link.download = result.filename || result.qmdFilename || result.texFilename; // Set filename for download
         link.style.display = 'none'; // Hide the link
         document.body.appendChild(link);
         link.click();
@@ -813,6 +818,22 @@ Please respond with a JSON object in this format:
         setTimeout(() => {
           document.body.removeChild(link);
         }, 100);
+
+        // If LaTeX generated a PDF, offer to download it too
+        if (format === 'latex' && result.pdfGenerated && result.pdfDownloadUrl) {
+          console.log('LaTeX PDF available, triggering second download:', result.pdfDownloadUrl);
+          setTimeout(() => {
+            const pdfLink = document.createElement('a');
+            pdfLink.href = result.pdfDownloadUrl;
+            pdfLink.download = result.pdfFilename;
+            pdfLink.style.display = 'none';
+            document.body.appendChild(pdfLink);
+            pdfLink.click();
+            setTimeout(() => {
+              document.body.removeChild(pdfLink);
+            }, 100);
+          }, 500); // Delay second download to avoid browser blocking
+        }
 
         console.log('=== EXPORT SUCCESS ===');
       } else if (format === 'pdf') {
@@ -2826,6 +2847,19 @@ Respond with ONLY a JSON code block in this format:
               </button>
             )}
 
+            {/* Font Toggle - only visible in Report mode */}
+            {viewMode === 'report' && (
+              <button
+                onClick={() => setReportFontStyle(prev => prev === 'serif' ? 'sans-serif' : 'serif')}
+                className="flex items-center gap-1 hover:bg-gray-200 rounded transition-colors px-1"
+                title={reportFontStyle === 'serif' ? "Switch to Sans Serif font" : "Switch to Serif font"}
+              >
+                <span className="text-[12px] font-medium text-gray-700" style={{ fontFamily: reportFontStyle === 'serif' ? 'serif' : 'sans-serif' }}>
+                  {reportFontStyle === 'serif' ? 'Aa' : 'Aa'}
+                </span>
+              </button>
+            )}
+
             {/* Separator before Export Report */}
             {viewMode === 'report' && (
               <div className="h-4 w-px bg-gray-300 mx-1"></div>
@@ -3114,7 +3148,7 @@ Respond with ONLY a JSON code block in this format:
         ) : (
           /* Report Mode - Single full-height panel */
           <div id="report-panel" className="flex-1 bg-white border-l border-gray-200 overflow-auto rounded-[10px]">
-            <div className="h-full p-6">
+            <div className="h-full p-6" style={{ fontFamily: reportFontStyle === 'serif' ? 'Georgia, "Times New Roman", Times, serif' : '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
               {!reportTitle ? (
                 /* Empty state - no dataset loaded */
                 <div className="flex items-start justify-center pt-16">
