@@ -32,7 +32,9 @@
       "Bash(node server.js:*)",
       "Bash(npm start)",
       "Bash(node -c:*)",
-      "Bash(timeout 5 npm run dev:*)"
+      "Bash(timeout 5 npm run dev:*)",
+      "Bash(node --check:*)",
+      "Bash(git remote add:*)"
     ],
     "deny": [],
     "ask": []
